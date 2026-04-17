@@ -15,7 +15,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 load_dotenv()
 
-GPX_PATH = Path(__file__).parent / "gsb.gpx"
+STAGES_DIR = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -86,7 +86,7 @@ def run_agent(location: str, distance: float, trip_date: date, start_hour: int =
     try:
         from agent import run, _render, _narrative, _slickness
         result = run(
-            gpx_path=None,  # agent dobierze etap automatycznie z folderu etapy/
+            gpx_path=STAGES_DIR,  # agent dobierze etap automatycznie z folderu etapy/
             location=location,
             distance_km=distance,
             day=trip_date,

@@ -84,7 +84,7 @@ def load_gpx(path: str | Path) -> list[TrailPoint]:
 
 # ---------- Wybór etapu ----------
 
-STAGES_DIR = Path(__file__).parent / "etapy"
+STAGES_DIR = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 
 
 def list_stages() -> list[Path]:
