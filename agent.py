@@ -16,6 +16,7 @@ from pathlib import Path
 
 import gpxpy
 import requests
+from surface import enrich_rows
 
 
 # ---------- Model ----------
@@ -230,11 +231,15 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
             "ele": round(p.ele),
             "eta": eta.strftime("%H:%M"),
             "place": place,
+            "lat": p.lat,
+            "lon": p.lon,
             "t": mid.temp,
             "mm": mid.precip,
             "wind": mid.wind,
             "sky": WMO.get(mid.code, f"?{mid.code}"),
         })
+
+    enrich_rows(rows)
 
     return {
         "date": day.isoformat(),
@@ -269,7 +274,8 @@ def _narrative(rows):
     parts = []
     for w in rows:
         wind_desc = "wiatr słaby" if w["wind"] < 20 else "wiatr umiarkowany" if w["wind"] < 40 else "silny wiatr"
-        parts.append(f"{w['place']} ({w['eta']}): {w['sky']}, {w['t']:.0f}°C, {wind_desc}.")
+        surface_note = f", nawierzchnia {w['rain_risk']}" if w.get("rain_risk") else ""
+        parts.append(f"{w['place']} ({w['eta']}): {w['sky']}, {w['t']:.0f}°C, {wind_desc}{surface_note}.")
     return " → ".join(parts)
 
 
@@ -278,15 +284,23 @@ def _render(r):
         f"📍 Start na szlaku: {r['start_name']}  (odl. od Twojej lokalizacji: {r['dist_to_trail_km']} km)",
         f"📅 {r['date']}   📏 {r['length_km']} km   ⬆ {r['ascent_m']} m",
         "",
-        f"{'km':>5} {'m n.p.m.':>8} {'ETA':>6} {'°C':>5} {'mm':>5} {'km/h':>5}  {'niebo':<20} miejsce",
-        "-" * 80,
+        f"{'km':>5} {'ETA':>6} {'°C':>5} {'mm':>5} {'km/h':>5}  {'niebo':<20} {'podłoże':<14} {'SAC':<28} miejsce",
+        "-" * 115,
     ]
+    warnings = []
     for w in r["rows"]:
         out.append(
-            f"{w['km']:>5.1f} {w['ele']:>8} {w['eta']:>6} {w['t']:>5.1f} "
-            f"{w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']:<20} {w['place']}"
+            f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>5.1f} "
+            f"{w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']:<20} "
+            f"{w.get('surface', '?'):<14} {w.get('sac', ''):<28} {w['place']}"
         )
-    out += ["", r["summary"], "", _narrative(r["rows"])]
+        if w.get("warning"):
+            warnings.append(f"  km {w['km']:.1f}: {w['warning']}")
+
+    out += ["", r["summary"]]
+    if warnings:
+        out += ["", "⚠ OSTRZEŻENIA TERENOWE:"] + warnings
+    out += ["", _narrative(r["rows"])]
     return "\n".join(out)
 
 
