@@ -340,6 +340,42 @@ def _slickness(row) -> str:
         return "lekko mokro"
     return "ok"
 
+SURFACE_PL = {
+    "asphalt":            "asfalt",
+    "concrete":           "beton",
+    "concrete:lanes":     "beton (pasy)",
+    "concrete:plates":    "płyty betonowe",
+    "paving_stones":      "kostka brukowa",
+    "sett":               "kamień ciosany",
+    "cobblestone":        "kocie łby",
+    "unhewn_cobblestone": "kamień polny",
+    "metal":              "metal",
+    "wood":               "drewno",
+    "tiles":              "płytki",
+    "paved":              "utwardzona",
+    "unpaved":            "nieutwardzona",
+    "compacted":          "ubita (żwir)",
+    "fine_gravel":        "drobny żwir",
+    "gravel":             "żwir",
+    "pebblestone":        "otoczaki",
+    "dirt":               "ziemia",
+    "earth":              "ziemia",
+    "grass":              "trawa",
+    "grass_paver":        "trawa/kratka",
+    "ground":             "grunt",
+    "mud":                "błoto",
+    "sand":               "piasek",
+    "woodchips":          "zrębki",
+    "snow":               "śnieg",
+    "ice":                "lód",
+    "clay":               "glina",
+    "rock":               "skała",
+    "roots":              "korzenie",
+    "stone":              "kamień",
+}
+
+def _translate_surface(s: str) -> str:
+    return SURFACE_PL.get(s.strip().replace(" *", ""), s)
 
 def _render(r):
     out = [
@@ -361,7 +397,7 @@ def _render(r):
         out.append(
             f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>4.0f} "
             f"{w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']:<20} "
-            f"{w.get('surface', '?'):<16} {slick:<10} "
+            f"{_translate_surface(w.get('surface', '?')):<16} {slick:<10} "
             f"{w.get('sac', ''):<24} {_poi_icon(w.get('poi_kind',''))} {w['place']}"
         )
 
