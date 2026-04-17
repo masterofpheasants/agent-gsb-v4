@@ -1,13 +1,15 @@
 """
-Beskidzki Agent — moduł pogody (MVP)
+Beskidzki Agent — moduł pogody
 
-Wejście: plik GPX (eksport z mapy.com), nazwa/km punktu startu i końca.
-Wyjście: prognoza wzdłuż odcinka + ostrzeżenia.
+Użycie:
+  python agent.py gsb.gpx --from "Wołosate" --distance 24
+  python agent.py gsb.gpx --from "49.3621,22.7012" --distance 15 --date 2026-05-01
 """
 from __future__ import annotations
 
 import argparse
 import math
+import time as _time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -23,7 +25,7 @@ class TrailPoint:
     lat: float
     lon: float
     ele: float = 0.0
-    km: float = 0.0  # od początku GPX
+    km: float = 0.0
 
 
 @dataclass
@@ -47,10 +49,9 @@ def _haversine(a: TrailPoint, b: TrailPoint) -> float:
     return 2 * R * math.asin(math.sqrt(h))
 
 
-def load_gpx(path: str | Path):
+def load_gpx(path: str | Path) -> list[TrailPoint]:
     with open(path, "r", encoding="utf-8") as f:
         gpx = gpxpy.parse(f)
-
     pts: list[TrailPoint] = []
     acc = 0.0
     prev: TrailPoint | None = None
@@ -63,31 +64,54 @@ def load_gpx(path: str | Path):
                 tp.km = acc
                 pts.append(tp)
                 prev = tp
-
     if not pts:
         raise ValueError("Brak śladu w GPX")
-    return pts, gpx.waypoints
+    return pts
 
 
-def segment(pts, waypoints, start, end):
-    """start/end: float (km) lub str (nazwa waypointu)."""
-    def resolve(x):
-        if isinstance(x, (int, float)):
-            return min(range(len(pts)), key=lambda i: abs(pts[i].km - float(x)))
-        needle = str(x).lower().strip()
-        wp = next((w for w in waypoints if w.name and needle in w.name.lower()), None)
-        if not wp:
-            raise ValueError(f"Nie znaleziono punktu: {x}")
-        ref = TrailPoint(wp.latitude, wp.longitude)
-        return min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
+# ---------- Lokalizacja ----------
 
-    i, j = resolve(start), resolve(end)
-    if i > j:
-        i, j = j, i
-    return pts[i:j + 1]
+def parse_location(loc: str) -> tuple[float, float]:
+    """'49.123,22.456' → (lat, lon)   lub   'Wołosate' → Nominatim geocode."""
+    parts = loc.split(",")
+    if len(parts) == 2:
+        try:
+            return float(parts[0].strip()), float(parts[1].strip())
+        except ValueError:
+            pass
+    return geocode(loc)
 
 
-def sample_evenly(seg, n=5):
+def geocode(name: str) -> tuple[float, float]:
+    """Miejscowość/szczyt → (lat, lon)."""
+    r = requests.get(
+        "https://nominatim.openstreetmap.org/search",
+        params={"q": name, "format": "json", "limit": 1, "countrycodes": "pl"},
+        headers={"User-Agent": "BeskidzkiAgent/1.0"},
+        timeout=10,
+    )
+    r.raise_for_status()
+    results = r.json()
+    if not results:
+        raise ValueError(f"Nie znaleziono: '{name}'")
+    return float(results[0]["lat"]), float(results[0]["lon"])
+
+
+def nearest_idx(pts: list[TrailPoint], lat: float, lon: float) -> int:
+    ref = TrailPoint(lat, lon)
+    return min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
+
+
+def get_segment(pts: list[TrailPoint], lat: float, lon: float, distance_km: float) -> list[TrailPoint]:
+    idx = nearest_idx(pts, lat, lon)
+    start_km = pts[idx].km
+    seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
+    if not seg:
+        raise ValueError("Odcinek wykracza poza GPX")
+    return seg
+
+
+def sample_evenly(seg: list[TrailPoint], n: int = 5) -> list[TrailPoint]:
     if len(seg) <= n:
         return seg
     start_km, end_km = seg[0].km, seg[-1].km
@@ -101,7 +125,42 @@ def sample_evenly(seg, n=5):
     return picks
 
 
-# ---------- Pogoda (Open-Meteo, bez klucza) ----------
+# ---------- Geokodowanie odwrotne ----------
+
+_geo_cache: dict[tuple, str] = {}
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    key = (round(lat, 3), round(lon, 3))
+    if key in _geo_cache:
+        return _geo_cache[key]
+    try:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "format": "json", "zoom": 14},
+            headers={"User-Agent": "BeskidzkiAgent/1.0"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        addr = data.get("address", {})
+        name = (
+            data.get("name")
+            or addr.get("peak")
+            or addr.get("hamlet")
+            or addr.get("village")
+            or addr.get("town")
+            or addr.get("city")
+            or f"{lat:.3f},{lon:.3f}"
+        )
+        _geo_cache[key] = name
+        _time.sleep(1.1)  # Nominatim: max 1 req/s
+        return name
+    except Exception:
+        return f"{lat:.3f},{lon:.3f}"
+
+
+# ---------- Pogoda (Open-Meteo) ----------
 
 WMO = {
     0: "bezchmurnie", 1: "gł. słonecznie", 2: "częściowe zachm.", 3: "zachmurzenie",
@@ -116,7 +175,7 @@ WMO = {
 }
 
 
-def fetch(point: TrailPoint, day: date) -> list[Sample]:
+def fetch_weather(point: TrailPoint, day: date) -> list[Sample]:
     r = requests.get(
         "https://api.open-meteo.com/v1/forecast",
         params={
@@ -146,11 +205,16 @@ def fetch(point: TrailPoint, day: date) -> list[Sample]:
 
 # ---------- Orkiestracja ----------
 
-def weather_for_route(gpx_path, start, end, day: date, samples=5, start_hour=8, pace_kmh=3.0):
-    pts, wps = load_gpx(gpx_path)
-    seg = segment(pts, wps, start, end)
-    if not seg:
-        raise ValueError("Pusty odcinek")
+def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=3.0):
+    pts = load_gpx(gpx_path)
+    lat, lon = parse_location(location)
+
+    start_idx = nearest_idx(pts, lat, lon)
+    start_pt = pts[start_idx]
+    start_name = reverse_geocode(start_pt.lat, start_pt.lon)
+    dist_to_trail = _haversine(TrailPoint(lat, lon), start_pt)
+
+    seg = get_segment(pts, lat, lon, distance_km)
     picks = sample_evenly(seg, samples)
 
     base = datetime.combine(day, datetime.min.time()).replace(hour=start_hour)
@@ -158,12 +222,14 @@ def weather_for_route(gpx_path, start, end, day: date, samples=5, start_hour=8, 
     for p in picks:
         km_into = p.km - seg[0].km
         eta = base.fromtimestamp(base.timestamp() + km_into / pace_kmh * 3600)
-        hour = fetch(p, eta.date())
+        hour = fetch_weather(p, eta.date())
         mid = min(hour, key=lambda s: abs((s.time - eta).total_seconds()))
+        place = reverse_geocode(p.lat, p.lon)
         rows.append({
             "km": round(km_into, 1),
             "ele": round(p.ele),
             "eta": eta.strftime("%H:%M"),
+            "place": place,
             "t": mid.temp,
             "mm": mid.precip,
             "wind": mid.wind,
@@ -172,6 +238,8 @@ def weather_for_route(gpx_path, start, end, day: date, samples=5, start_hour=8, 
 
     return {
         "date": day.isoformat(),
+        "start_name": start_name,
+        "dist_to_trail_km": round(dist_to_trail, 2),
         "length_km": round(seg[-1].km - seg[0].km, 1),
         "ascent_m": _ascent(seg),
         "rows": rows,
@@ -197,37 +265,52 @@ def _summary(rows):
     return base + ("  " + " ".join(warn) if warn else "")
 
 
-# ---------- CLI ----------
+def _narrative(rows):
+    parts = []
+    for w in rows:
+        wind_desc = "wiatr słaby" if w["wind"] < 20 else "wiatr umiarkowany" if w["wind"] < 40 else "silny wiatr"
+        parts.append(f"{w['place']} ({w['eta']}): {w['sky']}, {w['t']:.0f}°C, {wind_desc}.")
+    return " → ".join(parts)
+
 
 def _render(r):
     out = [
+        f"📍 Start na szlaku: {r['start_name']}  (odl. od Twojej lokalizacji: {r['dist_to_trail_km']} km)",
         f"📅 {r['date']}   📏 {r['length_km']} km   ⬆ {r['ascent_m']} m",
         "",
-        f"{'km':>5} {'m n.p.m.':>8} {'ETA':>6} {'°C':>5} {'mm':>5} {'km/h':>5}  niebo",
+        f"{'km':>5} {'m n.p.m.':>8} {'ETA':>6} {'°C':>5} {'mm':>5} {'km/h':>5}  {'niebo':<20} miejsce",
+        "-" * 80,
     ]
     for w in r["rows"]:
-        out.append(f"{w['km']:>5.1f} {w['ele']:>8} {w['eta']:>6} {w['t']:>5.1f} {w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']}")
-    out += ["", r["summary"]]
+        out.append(
+            f"{w['km']:>5.1f} {w['ele']:>8} {w['eta']:>6} {w['t']:>5.1f} "
+            f"{w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']:<20} {w['place']}"
+        )
+    out += ["", r["summary"], "", _narrative(r["rows"])]
     return "\n".join(out)
 
 
+# ---------- CLI ----------
+
 def main():
-    ap = argparse.ArgumentParser(description="Beskidzki Agent — pogoda na trasie")
-    ap.add_argument("gpx", help="Plik GPX (eksport z mapy.com: udostępnij → pobierz GPX)")
-    ap.add_argument("--start", required=True, help="Nazwa punktu lub km od początku GPX")
-    ap.add_argument("--end", required=True, help="Nazwa punktu lub km od początku GPX")
-    ap.add_argument("--date", default=date.today().isoformat())
-    ap.add_argument("--start-hour", type=int, default=8)
-    ap.add_argument("--pace", type=float, default=3.0, help="km/h")
-    ap.add_argument("--samples", type=int, default=5)
+    ap = argparse.ArgumentParser(description="Beskidzki Agent — pogoda na trasie GSB")
+    ap.add_argument("gpx", help="Plik GPX całego szlaku")
+    ap.add_argument("--from", dest="location", required=True,
+                    help="Twoja lokalizacja: nazwa miejscowości lub 'lat,lon'")
+    ap.add_argument("--distance", type=float, required=True,
+                    help="Ile km chcesz przejść")
+    ap.add_argument("--date", default=date.today().isoformat(),
+                    help="Data wędrówki YYYY-MM-DD (domyślnie: dziś)")
+    ap.add_argument("--start-hour", type=int, default=8,
+                    help="Godzina wyjścia (domyślnie: 8)")
+    ap.add_argument("--pace", type=float, default=3.0,
+                    help="Tempo km/h (domyślnie: 3.0)")
+    ap.add_argument("--samples", type=int, default=5,
+                    help="Liczba próbek pogodowych (domyślnie: 5)")
     a = ap.parse_args()
 
-    def parse(x):
-        try: return float(x)
-        except ValueError: return x
-
-    res = weather_for_route(
-        a.gpx, parse(a.start), parse(a.end),
+    res = run(
+        a.gpx, a.location, a.distance,
         date.fromisoformat(a.date),
         samples=a.samples, start_hour=a.start_hour, pace_kmh=a.pace,
     )
