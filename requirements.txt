@@ -1,2 +1,4 @@
 gpxpy>=1.6
 requests>=2.31
+python-telegram-bot>=20.0
+python-dotenv>=1.0
