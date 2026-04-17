@@ -24,10 +24,14 @@ logging.basicConfig(
 
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
+# Pamietamy ostatnia godzine startu per user (domyslnie 7:00)
+_hour_cache: dict[int, int] = {}
+_gps_cache: dict[int, tuple[float, float]] = {}
+
 
 # ---------- Helpers ----------
 
-def parse_message(text: str):
+def parse_message(text: str, user_id: int = 0):
     parts = text.strip().split()
     if len(parts) < 2:
         return None
@@ -40,13 +44,30 @@ def parse_message(text: str):
         except ValueError:
             pass
 
+    # Sprawdz godzine startu np. "8:00" lub "8"
+    start_hour = None
+    if len(parts) >= 3:
+        try:
+            h = parts[-1].replace(":00", "").replace("h", "")
+            start_hour = int(h)
+            if 0 <= start_hour <= 23:
+                parts = parts[:-1]
+                _hour_cache[user_id] = start_hour
+            else:
+                start_hour = None
+        except ValueError:
+            pass
+
+    if start_hour is None:
+        start_hour = _hour_cache.get(user_id, 7)
+
     try:
         distance = float(parts[-1])
     except ValueError:
         return None
 
     location = " ".join(parts[:-1])
-    return location, distance, trip_date
+    return location, distance, trip_date, start_hour
 
 
 def store_result(uid: str, data: dict):
@@ -64,7 +85,7 @@ def store_result(uid: str, data: dict):
         logging.warning(f"Nie mozna zapisac wyniku do webapp: {e}")
 
 
-def run_agent(location: str, distance: float, trip_date: date):
+def run_agent(location: str, distance: float, trip_date: date, start_hour: int = 7):
     """Odpala agenta, zwraca (tekst, dict_surowy)."""
     try:
         from agent import run, _render, _narrative, _slickness
@@ -74,7 +95,7 @@ def run_agent(location: str, distance: float, trip_date: date):
             distance_km=distance,
             day=trip_date,
             samples=5,
-            start_hour=8,
+            start_hour=start_hour,
             pace_kmh=3.0,
         )
         for w in result.get("rows", []):
@@ -97,20 +118,23 @@ HELP = """Beskidzki Agent GSB
 
 Wyslij:
   <miejscowosc> <km>
-  <miejscowosc> <km> <data>
+  <miejscowosc> <km> <godzina>
+  <miejscowosc> <km> <godzina> <data>
 
 Przyklady:
   Jordanow 20
-  Babia Gora 15 2026-05-10
+  Jordanow 20 6
+  Babia Gora 15 7:00 2026-05-10
   Ustron 30
+
+Godzina startu jest zapamietywana miedzy zapytaniami.
+Domyslnie: 7:00.
 
 Mozesz tez wyslac lokalizacje GPS z Telegrama,
 a potem napisac ile km chcesz przejsc.
 
 /help - ta wiadomosc
 """
-
-_gps_cache: dict[int, tuple[float, float]] = {}
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,25 +192,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             distance = float(text)
             lat, lon = _gps_cache.pop(user_id)
             location = f"{lat},{lon}"
+            start_hour = _hour_cache.get(user_id, 7)
             await update.message.reply_text("Szukam trasy i pogody, chwileczke...")
-            result_text, raw = run_agent(location, distance, date.today())
+            result_text, raw = run_agent(location, distance, date.today(), start_hour)
             uid = f"{user_id}_{int(date.today().strftime('%Y%m%d'))}"
             await _send_result(update, result_text, raw, uid)
             return
         except ValueError:
             pass
 
-    parsed = parse_message(text)
+    parsed = parse_message(text, user_id)
     if not parsed:
         await update.message.reply_text(
             "Nie rozumiem. Przyklad: Jordanow 20\nLub wyslij lokalizacje GPS i napisz ile km."
         )
         return
 
-    location, distance, trip_date = parsed
-    await update.message.reply_text(f"Szukam trasy od '{location}' na {distance:.0f} km...")
+    location, distance, trip_date, start_hour = parsed
+    await update.message.reply_text(
+        f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00..."
+    )
 
-    result_text, raw = run_agent(location, distance, trip_date)
+    result_text, raw = run_agent(location, distance, trip_date, start_hour)
     uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
     await _send_result(update, result_text, raw, uid)
 
