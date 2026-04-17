@@ -185,7 +185,10 @@ def _split(text: str, limit: int = 3800) -> list[str]:
 
 def main():
     if not TOKEN:
-        raise RuntimeError("Brak BOT_TOKEN w pliku .env")
+        import os
+        BOT_TOKEN = os.environ.get("BOT_TOKEN")
+    if not BOT_TOKEN:
+        raise RuntimeError("Brak BOT_TOKEN w zmiennych środowiskowych")
     if not GPX_PATH.exists():
         print(f"UWAGA: brak pliku {GPX_PATH} - bot uruchomiony ale nie bedzie dzialal bez GPX.")
 
