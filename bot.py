@@ -184,20 +184,16 @@ def _split(text: str, limit: int = 3800) -> list[str]:
 # ---------- Main ----------
 
 def main():
-    if not TOKEN:
-        import os
-        BOT_TOKEN = os.environ.get("BOT_TOKEN")
+    BOT_TOKEN = os.environ.get("BOT_TOKEN")
     if not BOT_TOKEN:
         raise RuntimeError("Brak BOT_TOKEN w zmiennych środowiskowych")
     if not GPX_PATH.exists():
         print(f"UWAGA: brak pliku {GPX_PATH} - bot uruchomiony ale nie bedzie dzialal bez GPX.")
-
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
     print("Bot uruchomiony. Zatrzymaj przez Ctrl+C.")
     app.run_polling()
 
