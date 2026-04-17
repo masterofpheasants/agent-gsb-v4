@@ -1,28 +1,18 @@
 """
 bot.py - Telegram bot dla Beskidzkiego Agenta
-
-Uzycie na telefonie:
-  /start          - pomoc
-  Jordanow 20     - prognoza od Jordanowa na 20 km
-  49.123,19.456 15 - prognoza z GPS na 15 km
-
-Uruchomienie:
-  python bot.py
 """
 import logging
 import os
+import requests as http_requests
 from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Laduj token z .env
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Sciezka do GPX - zakladamy ze jest w tym samym folderze
 GPX_PATH = Path(__file__).parent / "gsb.gpx"
 
 logging.basicConfig(
@@ -30,23 +20,17 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+# URL do webapp (ustaw w Railway Variables jako WEBAPP_URL)
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
+
 
 # ---------- Helpers ----------
 
-def parse_message(text: str) -> tuple[str, float] | None:
-    """
-    Parsuje wiadomosc uzytkownika.
-    Formaty:
-      'Jordanow 20'
-      'Babia Gora 15 2026-05-01'
-      '49.123,19.456 10'
-    Zwraca (lokalizacja, dystans) lub None jesli nie mozna sparsowac.
-    """
+def parse_message(text: str):
     parts = text.strip().split()
     if len(parts) < 2:
         return None
 
-    # Sprawdz czy ostatni element to data
     trip_date = date.today()
     if len(parts) >= 3:
         try:
@@ -55,7 +39,6 @@ def parse_message(text: str) -> tuple[str, float] | None:
         except ValueError:
             pass
 
-    # Ostatni element to dystans
     try:
         distance = float(parts[-1])
     except ValueError:
@@ -65,10 +48,24 @@ def parse_message(text: str) -> tuple[str, float] | None:
     return location, distance, trip_date
 
 
-def run_agent(location: str, distance: float, trip_date: date) -> str:
-    """Odpala agenta i zwraca sformatowany wynik."""
+def store_result(uid: str, data: dict):
+    """Zapisuje wynik do webapp API."""
+    if not WEBAPP_URL:
+        return
     try:
-        from agent import run, _render
+        http_requests.post(
+            f"{WEBAPP_URL}/api/store",
+            json={"uid": uid, "data": data},
+            timeout=5
+        )
+    except Exception as e:
+        logging.warning(f"Nie mozna zapisac wyniku do webapp: {e}")
+
+
+def run_agent(location: str, distance: float, trip_date: date):
+    """Odpala agenta, zwraca (tekst, dict_surowy)."""
+    try:
+        from agent import run, _render, _narrative, _slickness
         result = run(
             gpx_path=GPX_PATH,
             location=location,
@@ -78,14 +75,19 @@ def run_agent(location: str, distance: float, trip_date: date) -> str:
             start_hour=8,
             pace_kmh=3.0,
         )
-        return _render(result)
+        # Wzbogac wiersze o slickness (potrzebne w webapp)
+        for w in result.get("rows", []):
+            w["slickness"] = _slickness(w)
+        result["narrative"] = _narrative(result.get("rows", []))
+        result["soil_summary"] = result["rows"][0].get("soil_summary", "") if result.get("rows") else ""
+        return _render(result), result
     except ValueError as e:
-        return f"Blad: {e}"
+        return f"Blad: {e}", None
     except FileNotFoundError:
-        return "Blad: nie znaleziono pliku gsb.gpx. Upewnij sie ze jest w folderze bota."
+        return "Blad: nie znaleziono pliku gsb.gpx.", None
     except Exception as e:
         logging.exception("Agent error")
-        return f"Blad agenta: {e}"
+        return f"Blad agenta: {e}", None
 
 
 # ---------- Handlery ----------
@@ -107,7 +109,6 @@ a potem napisac ile km chcesz przejsc.
 /help - ta wiadomosc
 """
 
-# Pamietamy ostatnia lokalizacje GPS z telefonu (per user)
 _gps_cache: dict[int, tuple[float, float]] = {}
 
 
@@ -120,7 +121,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Uzytkownik wyslal lokalizacje GPS z telefonu."""
     loc = update.message.location
     user_id = update.effective_user.id
     _gps_cache[user_id] = (loc.latitude, loc.longitude)
@@ -130,26 +130,55 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
+    """Tworzy przycisk otwierający WebApp, lub None jeśli brak WEBAPP_URL."""
+    if not WEBAPP_URL:
+        return None
+    url = f"{WEBAPP_URL}/?uid={uid}"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📊 Pokaż tabelę", web_app=WebAppInfo(url=url))
+    ]])
+
+
+async def _send_result(update: Update, text: str, raw: dict | None, uid: str):
+    """Wysyła wynik: krótkie podsumowanie + przycisk WebApp."""
+    if raw:
+        store_result(uid, raw)
+
+    # Krótkie podsumowanie w chacie
+    lines = text.split("\n")
+    short = "\n".join(lines[:4])  # nagłówek
+    keyboard = _webapp_button(uid)
+
+    if keyboard:
+        await update.message.reply_text(
+            f"```\n{short}\n```\nSzczegóły w tabeli 👇",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    else:
+        # Fallback - stary tryb tekstowy
+        for chunk in _split(text):
+            await update.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
-    # Jesli uzytkownik wyslal GPS wczesniej i teraz podaje tylko liczbe
     if user_id in _gps_cache:
         try:
             distance = float(text)
             lat, lon = _gps_cache.pop(user_id)
             location = f"{lat},{lon}"
             await update.message.reply_text("Szukam trasy i pogody, chwileczke...")
-            result = run_agent(location, distance, date.today())
-            # Telegram ma limit 4096 znakow - podziel jesli za dlugie
-            for chunk in _split(result):
-                await update.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
+            result_text, raw = run_agent(location, distance, date.today())
+            uid = f"{user_id}_{int(date.today().strftime('%Y%m%d'))}"
+            await _send_result(update, result_text, raw, uid)
             return
         except ValueError:
-            pass  # nie liczba - traktuj normalnie
+            pass
 
-    # Standardowy format: "miejscowosc km" lub "miejscowosc km data"
     parsed = parse_message(text)
     if not parsed:
         await update.message.reply_text(
@@ -160,13 +189,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     location, distance, trip_date = parsed
     await update.message.reply_text(f"Szukam trasy od '{location}' na {distance:.0f} km...")
 
-    result = run_agent(location, distance, trip_date)
-    for chunk in _split(result):
-        await update.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
+    result_text, raw = run_agent(location, distance, trip_date)
+    uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
+    await _send_result(update, result_text, raw, uid)
 
 
 def _split(text: str, limit: int = 3800) -> list[str]:
-    """Dzieli dlugi tekst na kawалki dla Telegrama."""
     lines = text.split("\n")
     chunks, current = [], []
     length = 0
@@ -189,6 +217,8 @@ def main():
         raise RuntimeError("Brak BOT_TOKEN w zmiennych środowiskowych")
     if not GPX_PATH.exists():
         print(f"UWAGA: brak pliku {GPX_PATH} - bot uruchomiony ale nie bedzie dzialal bez GPX.")
+    if not WEBAPP_URL:
+        print("UWAGA: brak WEBAPP_URL - tabela HTML niedostepna, tryb tekstowy.")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
