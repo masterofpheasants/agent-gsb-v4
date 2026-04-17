@@ -16,7 +16,10 @@ from pathlib import Path
 
 import gpxpy
 import requests
-from surface import enrich_rows
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from surface import enrich_rows, check_distance_warning
+from waypoints import smart_picks, picks_to_trailpoints
 
 
 # ---------- Model ----------
@@ -141,6 +144,7 @@ def reverse_geocode(lat: float, lon: float) -> str:
             params={"lat": lat, "lon": lon, "format": "json", "zoom": 14},
             headers={"User-Agent": "BeskidzkiAgent/1.0"},
             timeout=10,
+            verify=False,
         )
         r.raise_for_status()
         data = r.json()
@@ -216,16 +220,21 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
     dist_to_trail = _haversine(TrailPoint(lat, lon), start_pt)
 
     seg = get_segment(pts, lat, lon, distance_km)
-    picks = sample_evenly(seg, samples)
+
+    # Inteligentne probkowanie: szczyty, przelecze, zmiany terenu
+    poi_list = smart_picks(seg, include_peaks=True, include_terrain=True)
+    picks_with_meta = picks_to_trailpoints(poi_list, seg)
+    if not picks_with_meta:
+        picks_with_meta = [(p, "", "even") for p in sample_evenly(seg, samples)]
 
     base = datetime.combine(day, datetime.min.time()).replace(hour=start_hour)
     rows = []
-    for p in picks:
+    for p, poi_name, poi_kind in picks_with_meta:
         km_into = p.km - seg[0].km
         eta = base.fromtimestamp(base.timestamp() + km_into / pace_kmh * 3600)
         hour = fetch_weather(p, eta.date())
         mid = min(hour, key=lambda s: abs((s.time - eta).total_seconds()))
-        place = reverse_geocode(p.lat, p.lon)
+        place = poi_name if poi_name and poi_name not in ("start", "koniec") else reverse_geocode(p.lat, p.lon)
         rows.append({
             "km": round(km_into, 1),
             "ele": round(p.ele),
@@ -237,16 +246,21 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
             "mm": mid.precip,
             "wind": mid.wind,
             "sky": WMO.get(mid.code, f"?{mid.code}"),
+            "poi_kind": poi_kind,
         })
 
     enrich_rows(rows)
+    ascent = _ascent(seg)
+    length_km = round(seg[-1].km - seg[0].km, 1)
+    dist_warn = check_distance_warning(length_km, ascent)
 
     return {
         "date": day.isoformat(),
         "start_name": start_name,
         "dist_to_trail_km": round(dist_to_trail, 2),
-        "length_km": round(seg[-1].km - seg[0].km, 1),
-        "ascent_m": _ascent(seg),
+        "length_km": length_km,
+        "ascent_m": ascent,
+        "dist_warning": dist_warn,
         "rows": rows,
         "summary": _summary(rows),
     }
@@ -268,6 +282,11 @@ def _summary(rows):
     if any(r["sky"].startswith("burza") for r in rows): warn.append("⚠ burza")
     base = f"{tmin:.0f}–{tmax:.0f}°C · Σ{precip:.1f} mm · wiatr max {wind:.0f} km/h"
     return base + ("  " + " ".join(warn) if warn else "")
+
+
+def _poi_icon(kind):
+    icons = {"peak": "^", "pass": "~v", "terrain_change": ">>", "start": ">", "end": "[]"}
+    return icons.get(kind, " ")
 
 
 def _narrative(rows):
@@ -292,12 +311,14 @@ def _render(r):
         out.append(
             f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>5.1f} "
             f"{w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']:<20} "
-            f"{w.get('surface', '?'):<14} {w.get('sac', ''):<28} {w['place']}"
+            f"{w.get('surface', '?'):<14} {w.get('sac', ''):<28} {_poi_icon(w.get('poi_kind',''))} {w['place']}"
         )
         if w.get("warning"):
             warnings.append(f"  km {w['km']:.1f}: {w['warning']}")
 
     out += ["", r["summary"]]
+    if r.get("dist_warning"):
+        out += ["", "! DYSTANS: " + r["dist_warning"]]
     if warnings:
         out += ["", "⚠ OSTRZEŻENIA TERENOWE:"] + warnings
     out += ["", _narrative(r["rows"])]
