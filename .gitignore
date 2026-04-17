@@ -6,6 +6,5 @@ venv/
 .env
 .idea/
 .vscode/
-*.gpx
 !example.gpx
 .DS_Store
