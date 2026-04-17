@@ -1,8 +1,10 @@
 """
 bot.py - Telegram bot dla Beskidzkiego Agenta
 """
+import json
 import logging
 import os
+import threading
 import requests as http_requests
 from datetime import date
 from pathlib import Path
@@ -20,7 +22,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# URL do webapp (ustaw w Railway Variables jako WEBAPP_URL)
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
 
@@ -53,9 +54,10 @@ def store_result(uid: str, data: dict):
     if not WEBAPP_URL:
         return
     try:
+        clean = json.loads(json.dumps(data, default=str))
         http_requests.post(
             f"{WEBAPP_URL}/api/store",
-            json={"uid": uid, "data": data},
+            json={"uid": uid, "data": clean},
             timeout=5
         )
     except Exception as e:
@@ -75,7 +77,6 @@ def run_agent(location: str, distance: float, trip_date: date):
             start_hour=8,
             pace_kmh=3.0,
         )
-        # Wzbogac wiersze o slickness (potrzebne w webapp)
         for w in result.get("rows", []):
             w["slickness"] = _slickness(w)
         result["narrative"] = _narrative(result.get("rows", []))
@@ -131,7 +132,6 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
-    """Tworzy przycisk otwierający WebApp, lub None jeśli brak WEBAPP_URL."""
     if not WEBAPP_URL:
         return None
     url = f"{WEBAPP_URL}/?uid={uid}"
@@ -141,13 +141,11 @@ def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
 
 
 async def _send_result(update: Update, text: str, raw: dict | None, uid: str):
-    """Wysyła wynik: krótkie podsumowanie + przycisk WebApp."""
     if raw:
         store_result(uid, raw)
 
-    # Krótkie podsumowanie w chacie
     lines = text.split("\n")
-    short = "\n".join(lines[:4])  # nagłówek
+    short = "\n".join(lines[:4])
     keyboard = _webapp_button(uid)
 
     if keyboard:
@@ -157,7 +155,6 @@ async def _send_result(update: Update, text: str, raw: dict | None, uid: str):
             reply_markup=keyboard
         )
     else:
-        # Fallback - stary tryb tekstowy
         for chunk in _split(text):
             await update.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
 
@@ -219,6 +216,12 @@ def main():
         print(f"UWAGA: brak pliku {GPX_PATH} - bot uruchomiony ale nie bedzie dzialal bez GPX.")
     if not WEBAPP_URL:
         print("UWAGA: brak WEBAPP_URL - tabela HTML niedostepna, tryb tekstowy.")
+
+    # Uruchom Flask webapp w tle
+    from webapp import run_webapp
+    t = threading.Thread(target=run_webapp, daemon=True)
+    t.start()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
