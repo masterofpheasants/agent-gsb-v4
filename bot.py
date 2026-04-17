@@ -20,7 +20,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 # Laduj token z .env
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Sciezka do GPX - zakladamy ze jest w tym samym folderze
 GPX_PATH = Path(__file__).parent / "gsb.gpx"
