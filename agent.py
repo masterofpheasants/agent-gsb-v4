@@ -393,6 +393,7 @@ def _render(r):
     ]
 
     for w in r["rows"]:
+        print(f"DEBUG surface: '{w.get('surface', '?')}'")  # usuń po debugowaniu
         slick = _slickness(w)
         out.append(
             f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>4.0f} "
