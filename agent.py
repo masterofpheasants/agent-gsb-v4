@@ -20,6 +20,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from surface import enrich_rows, check_distance_warning
 from waypoints import smart_picks, picks_to_trailpoints
+from soil import enrich_with_soil
 
 
 # ---------- Model ----------
@@ -224,8 +225,17 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
     # Inteligentne probkowanie: szczyty, przelecze, zmiany terenu
     poi_list = smart_picks(seg, include_peaks=True, include_terrain=True)
     picks_with_meta = picks_to_trailpoints(poi_list, seg)
-    if not picks_with_meta:
-        picks_with_meta = [(p, "", "even") for p in sample_evenly(seg, samples)]
+
+    # Fallback + uzupelnienie: jesli za malo punktow, dodaj rownomierne
+    MIN_POINTS = max(samples, 4)
+    if len(picks_with_meta) < MIN_POINTS:
+        even = [(p, "", "even") for p in sample_evenly(seg, MIN_POINTS)]
+        existing_kms = {p.km for p, _, _ in picks_with_meta}
+        for tp, name, kind in even:
+            if not any(abs(tp.km - k) < 2.0 for k in existing_kms):
+                picks_with_meta.append((tp, name, kind))
+                existing_kms.add(tp.km)
+        picks_with_meta.sort(key=lambda x: x[0].km)
 
     base = datetime.combine(day, datetime.min.time()).replace(hour=start_hour)
     rows = []
@@ -250,6 +260,7 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
         })
 
     enrich_rows(rows)
+    enrich_with_soil(rows, day)
     ascent = _ascent(seg)
     length_km = round(seg[-1].km - seg[0].km, 1)
     dist_warn = check_distance_warning(length_km, ascent)
@@ -298,29 +309,67 @@ def _narrative(rows):
     return " → ".join(parts)
 
 
+def _poi_icon(kind):
+    icons = {"peak": "^", "pass": "~v", "terrain_change": ">>", "start": ">", "end": "[]"}
+    return icons.get(kind, " ")
+
+
+def _slickness(row) -> str:
+    """Inline ocena sliskosci: ok / mokro / slisko! na podstawie pogody + historii."""
+    mm       = row.get("mm", 0)
+    surface  = row.get("surface", "ground").replace(" *", "").strip()
+    soil_lvl = row.get("soil", None)
+    soil_level = soil_lvl.level if soil_lvl else "sucho"
+
+    soft = {"ground", "dirt", "mud", "grass", "roots", "unpaved", "rock", "stone", "wood"}
+    hard = {"asphalt", "paved", "concrete", "compacted"}
+
+    if surface in hard:
+        if mm > 3:
+            return "mokro"
+        return "ok"
+
+    # miekka nawierzchnia
+    if soil_level == "bloto" or (soil_level == "nasaczone" and mm > 1):
+        return "SLISKO!"
+    if soil_level == "nasaczone" or (soil_level == "lekko" and mm > 1):
+        return "mokro"
+    if mm > 3:
+        return "mokro"
+    if mm > 0:
+        return "lekko mokro"
+    return "ok"
+
+
 def _render(r):
     out = [
-        f"📍 Start na szlaku: {r['start_name']}  (odl. od Twojej lokalizacji: {r['dist_to_trail_km']} km)",
-        f"📅 {r['date']}   📏 {r['length_km']} km   ⬆ {r['ascent_m']} m",
-        "",
-        f"{'km':>5} {'ETA':>6} {'°C':>5} {'mm':>5} {'km/h':>5}  {'niebo':<20} {'podłoże':<14} {'SAC':<28} miejsce",
-        "-" * 115,
+        f"Lokalizacja: {r['start_name']}  (odl. {r['dist_to_trail_km']} km od szlaku)",
+        f"Data: {r['date']}   Dystans: {r['length_km']} km   Podejscie: {r['ascent_m']} m",
     ]
-    warnings = []
+
+    if r["rows"] and r["rows"][0].get("soil_summary"):
+        out += ["", r["rows"][0]["soil_summary"]]
+
+    out += [
+        "",
+        f"{'km':>5} {'ETA':>6} {'C':>4} {'mm':>5} {'km/h':>5}  {'niebo':<20} {'podloze':<16} {'sliskos.':<10} {'SAC':<24} miejsce",
+        "-" * 120,
+    ]
+
     for w in r["rows"]:
+        slick = _slickness(w)
         out.append(
-            f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>5.1f} "
+            f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>4.0f} "
             f"{w['mm']:>5.1f} {w['wind']:>5.1f}  {w['sky']:<20} "
-            f"{w.get('surface', '?'):<14} {w.get('sac', ''):<28} {_poi_icon(w.get('poi_kind',''))} {w['place']}"
+            f"{w.get('surface', '?'):<16} {slick:<10} "
+            f"{w.get('sac', ''):<24} {_poi_icon(w.get('poi_kind',''))} {w['place']}"
         )
-        if w.get("warning"):
-            warnings.append(f"  km {w['km']:.1f}: {w['warning']}")
 
     out += ["", r["summary"]]
+
     if r.get("dist_warning"):
         out += ["", "! DYSTANS: " + r["dist_warning"]]
-    if warnings:
-        out += ["", "⚠ OSTRZEŻENIA TERENOWE:"] + warnings
+
     out += ["", _narrative(r["rows"])]
     return "\n".join(out)
 
