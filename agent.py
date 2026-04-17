@@ -70,8 +70,79 @@ def load_gpx(path: str | Path) -> list[TrailPoint]:
                 pts.append(tp)
                 prev = tp
     if not pts:
+        # Spróbuj wczytać waypoints jeśli brak tracku
+        for wpt in gpx.waypoints:
+            tp = TrailPoint(wpt.latitude, wpt.longitude, wpt.elevation or 0.0)
+            if pts:
+                acc += _haversine(pts[-1], tp)
+            tp.km = acc
+            pts.append(tp)
+    if not pts:
         raise ValueError("Brak śladu w GPX")
     return pts
+
+
+# ---------- Wybór etapu ----------
+
+STAGES_DIR = Path(__file__).parent / "etapy"
+
+
+def list_stages() -> list[Path]:
+    """Zwraca posortowaną listę plików GPX z folderu etapy/."""
+    if not STAGES_DIR.exists():
+        return []
+    files = sorted(STAGES_DIR.glob("*.gpx"), key=lambda p: _stage_number(p.name))
+    return files
+
+
+def _stage_number(name: str) -> int:
+    try:
+        return int(name.split("_")[0])
+    except (ValueError, IndexError):
+        return 999
+
+
+def find_best_stage(lat: float, lon: float) -> Path | None:
+    """Znajdź etap GPX najbliższy podanej lokalizacji."""
+    stages = list_stages()
+    if not stages:
+        return None
+
+    ref = TrailPoint(lat, lon)
+    best_path = None
+    best_dist = float("inf")
+
+    for path in stages:
+        try:
+            pts = load_gpx(path)
+            # Sprawdź odległość od początku i końca etapu
+            dist_start = _haversine(ref, pts[0])
+            dist_end = _haversine(ref, pts[-1])
+            dist = min(dist_start, dist_end)
+            # Sprawdź też najbliższy punkt na trasie (próbkowanie co 10 punktów)
+            for i in range(0, len(pts), max(1, len(pts) // 20)):
+                d = _haversine(ref, pts[i])
+                if d < dist:
+                    dist = d
+            if dist < best_dist:
+                best_dist = dist
+                best_path = path
+        except Exception:
+            continue
+
+    return best_path
+
+
+def stage_name(path: Path) -> str:
+    """'3_Smerek_Cisna.gpx' → 'Etap 3: Smerek → Cisna'"""
+    stem = path.stem  # np. "3_Smerek_Cisna"
+    parts = stem.split("_")
+    try:
+        num = parts[0]
+        places = " → ".join(p.replace("-", " ") for p in parts[1:])
+        return f"Etap {num}: {places}"
+    except Exception:
+        return stem
 
 
 # ---------- Lokalizacja ----------
@@ -212,8 +283,16 @@ def fetch_weather(point: TrailPoint, day: date) -> list[Sample]:
 # ---------- Orkiestracja ----------
 
 def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=3.0):
-    pts = load_gpx(gpx_path)
     lat, lon = parse_location(location)
+
+    # Jeśli gpx_path=None, znajdź najlepszy etap automatycznie
+    if gpx_path is None:
+        gpx_path = find_best_stage(lat, lon)
+        if gpx_path is None:
+            raise FileNotFoundError("Brak plików GPX w folderze etapy/")
+
+    pts = load_gpx(gpx_path)
+    matched_stage = stage_name(Path(gpx_path))
 
     start_idx = nearest_idx(pts, lat, lon)
     start_pt = pts[start_idx]
@@ -268,6 +347,7 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
     return {
         "date": day.isoformat(),
         "start_name": start_name,
+        "stage": matched_stage,
         "dist_to_trail_km": round(dist_to_trail, 2),
         "length_km": length_km,
         "ascent_m": ascent,
@@ -309,27 +389,17 @@ def _narrative(rows):
     return " → ".join(parts)
 
 
-def _poi_icon(kind):
-    icons = {"peak": "^", "pass": "~v", "terrain_change": ">>", "start": ">", "end": "[]"}
-    return icons.get(kind, " ")
-
-
 def _slickness(row) -> str:
-    """Inline ocena sliskosci: ok / mokro / slisko! na podstawie pogody + historii."""
     mm       = row.get("mm", 0)
     surface  = row.get("surface", "ground").replace(" *", "").strip()
     soil_lvl = row.get("soil", None)
     soil_level = soil_lvl.level if soil_lvl else "sucho"
 
-    soft = {"ground", "dirt", "mud", "grass", "roots", "unpaved", "rock", "stone", "wood"}
     hard = {"asphalt", "paved", "concrete", "compacted"}
 
     if surface in hard:
-        if mm > 3:
-            return "mokro"
-        return "ok"
+        return "mokro" if mm > 3 else "ok"
 
-    # miekka nawierzchnia
     if soil_level == "bloto" or (soil_level == "nasaczone" and mm > 1):
         return "SLISKO!"
     if soil_level == "nasaczone" or (soil_level == "lekko" and mm > 1):
@@ -339,6 +409,7 @@ def _slickness(row) -> str:
     if mm > 0:
         return "lekko mokro"
     return "ok"
+
 
 SURFACE_PL = {
     "asphalt":            "asfalt",
@@ -374,12 +445,15 @@ SURFACE_PL = {
     "stone":              "kamień",
 }
 
+
 def _translate_surface(s: str) -> str:
     return SURFACE_PL.get(s.strip().replace(" *", ""), s)
+
 
 def _render(r):
     out = [
         f"Lokalizacja: {r['start_name']}  (odl. {r['dist_to_trail_km']} km od szlaku)",
+        f"{r.get('stage', '')}",
         f"Data: {r['date']}   Dystans: {r['length_km']} km   Podejscie: {r['ascent_m']} m",
     ]
 
@@ -393,7 +467,6 @@ def _render(r):
     ]
 
     for w in r["rows"]:
-        print(f"DEBUG surface: '{w.get('surface', '?')}'")  # usuń po debugowaniu
         slick = _slickness(w)
         out.append(
             f"{w['km']:>5.1f} {w['eta']:>6} {w['t']:>4.0f} "
@@ -415,7 +488,8 @@ def _render(r):
 
 def main():
     ap = argparse.ArgumentParser(description="Beskidzki Agent — pogoda na trasie GSB")
-    ap.add_argument("gpx", help="Plik GPX całego szlaku")
+    ap.add_argument("gpx", nargs="?", default=None,
+                    help="Plik GPX etapu (opcjonalny - jeśli pominięty, agent dobierze etap automatycznie)")
     ap.add_argument("--from", dest="location", required=True,
                     help="Twoja lokalizacja: nazwa miejscowości lub 'lat,lon'")
     ap.add_argument("--distance", type=float, required=True,

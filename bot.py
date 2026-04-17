@@ -24,7 +24,6 @@ logging.basicConfig(
 
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
-# Pamietamy ostatnia godzine startu per user (domyslnie 7:00)
 _hour_cache: dict[int, int] = {}
 _gps_cache: dict[int, tuple[float, float]] = {}
 
@@ -44,7 +43,6 @@ def parse_message(text: str, user_id: int = 0):
         except ValueError:
             pass
 
-    # Sprawdz godzine startu np. "8:00" lub "8"
     start_hour = None
     if len(parts) >= 3:
         try:
@@ -71,7 +69,6 @@ def parse_message(text: str, user_id: int = 0):
 
 
 def store_result(uid: str, data: dict):
-    """Zapisuje wynik do webapp API."""
     if not WEBAPP_URL:
         return
     try:
@@ -86,11 +83,10 @@ def store_result(uid: str, data: dict):
 
 
 def run_agent(location: str, distance: float, trip_date: date, start_hour: int = 7):
-    """Odpala agenta, zwraca (tekst, dict_surowy)."""
     try:
         from agent import run, _render, _narrative, _slickness
         result = run(
-            gpx_path=GPX_PATH,
+            gpx_path=None,  # agent dobierze etap automatycznie z folderu etapy/
             location=location,
             distance_km=distance,
             day=trip_date,
@@ -105,8 +101,8 @@ def run_agent(location: str, distance: float, trip_date: date, start_hour: int =
         return _render(result), result
     except ValueError as e:
         return f"Blad: {e}", None
-    except FileNotFoundError:
-        return "Blad: nie znaleziono pliku gsb.gpx.", None
+    except FileNotFoundError as e:
+        return f"Blad: {e}", None
     except Exception as e:
         logging.exception("Agent error")
         return f"Blad agenta: {e}", None
@@ -127,8 +123,8 @@ Przyklady:
   Babia Gora 15 7:00 2026-05-10
   Ustron 30
 
-Godzina startu jest zapamietywana miedzy zapytaniami.
-Domyslnie: 7:00.
+Agent automatycznie dobierze etap GSB.
+Godzina startu jest zapamietywana miedzy zapytaniami (domyslnie 7:00).
 
 Mozesz tez wyslac lokalizacje GPS z Telegrama,
 a potem napisac ile km chcesz przejsc.
@@ -169,7 +165,7 @@ async def _send_result(update: Update, text: str, raw: dict | None, uid: str):
         store_result(uid, raw)
 
     lines = text.split("\n")
-    short = "\n".join(lines[:4])
+    short = "\n".join(lines[:5])
     keyboard = _webapp_button(uid)
 
     if keyboard:
@@ -239,12 +235,9 @@ def main():
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
     if not BOT_TOKEN:
         raise RuntimeError("Brak BOT_TOKEN w zmiennych środowiskowych")
-    if not GPX_PATH.exists():
-        print(f"UWAGA: brak pliku {GPX_PATH} - bot uruchomiony ale nie bedzie dzialal bez GPX.")
     if not WEBAPP_URL:
         print("UWAGA: brak WEBAPP_URL - tabela HTML niedostepna, tryb tekstowy.")
 
-    # Uruchom Flask webapp w tle
     from webapp import run_webapp
     t = threading.Thread(target=run_webapp, daemon=True)
     t.start()
