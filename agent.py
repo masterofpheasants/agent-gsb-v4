@@ -408,6 +408,7 @@ def _render(r):
         out += ["", "! DYSTANS: " + r["dist_warning"]]
 
     out += ["", _narrative(r["rows"])]
+    logging.warning(f"SURFACE DEBUG: '{w.get('surface', '?')}'")
     return "\n".join(out)
 
 

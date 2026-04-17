@@ -197,6 +197,25 @@ function rainClass(mm) {
   if (mm < 2) return 'light';
   return 'heavy';
 }
+const SURFACE_PL = {
+  asphalt: "asfalt", concrete: "beton", "concrete:lanes": "beton (pasy)",
+  "concrete:plates": "płyty betonowe", paving_stones: "kostka brukowa",
+  sett: "kamień ciosany", cobblestone: "kocie łby",
+  unhewn_cobblestone: "kamień polny", metal: "metal", wood: "drewno",
+  tiles: "płytki", paved: "utwardzona", unpaved: "nieutwardzona",
+  compacted: "ubita (żwir)", fine_gravel: "drobny żwir", gravel: "żwir",
+  pebblestone: "otoczaki", dirt: "ziemia", earth: "ziemia", grass: "trawa",
+  grass_paver: "trawa/kratka", ground: "grunt", mud: "błoto", sand: "piasek",
+  woodchips: "zrębki", snow: "śnieg", ice: "lód", clay: "glina",
+  rock: "skała", roots: "korzenie", stone: "kamień",
+};
+
+function translateSurface(s) {
+  if (!s) return "";
+  const key = s.trim().replace(" *", "");
+  return SURFACE_PL[key] || s;
+}
+
 function slickBadge(slick) {
   if (!slick || slick === '-') return '';
   const s = slick.toLowerCase();
@@ -267,7 +286,7 @@ function render(r) {
       <td class="rain ${rc}">${(+w.mm).toFixed(1)}</td>
       <td>${(+w.wind).toFixed(1)}</td>
       <td class="left">${w.sky || ''}</td>
-      <td class="left">${w.surface || ''}</td>
+      <td class="left">${translateSurface(w.surface || '')}</td>
       <td class="left">${slickBadge(w.slickness || '')}</td>
       <td class="left sac">${w.sac || ''}</td>
     </tr>`;
