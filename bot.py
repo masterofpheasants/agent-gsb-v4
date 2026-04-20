@@ -6,12 +6,12 @@ import logging
 import os
 import threading
 import requests as http_requests
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, CallbackQuery
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 load_dotenv()
 
@@ -26,6 +26,8 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
 
 _hour_cache: dict[int, int] = {}
 _gps_cache: dict[int, tuple[float, float]] = {}
+# Cache zapytania czekającego na wybór daty
+_pending: dict[int, dict] = {}
 
 
 # ---------- Helpers ----------
@@ -35,7 +37,7 @@ def parse_message(text: str, user_id: int = 0):
     if len(parts) < 2:
         return None
 
-    trip_date = date.today()
+    trip_date = None  # brak daty = zapytaj przyciskami
     if len(parts) >= 3:
         try:
             trip_date = date.fromisoformat(parts[-1])
@@ -86,7 +88,7 @@ def run_agent(location: str, distance: float, trip_date: date, start_hour: int =
     try:
         from agent import run, _render, _narrative, _slickness
         result = run(
-            gpx_path=STAGES_DIR,  # agent dobierze etap automatycznie z folderu etapy/
+            gpx_path=STAGES_DIR,
             location=location,
             distance_km=distance,
             day=trip_date,
@@ -108,6 +110,24 @@ def run_agent(location: str, distance: float, trip_date: date, start_hour: int =
         return f"Blad agenta: {e}", None
 
 
+def _date_keyboard() -> InlineKeyboardMarkup:
+    today = date.today()
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📅 Dziś", callback_data=f"date:{today.isoformat()}"),
+        InlineKeyboardButton("📅 Jutro", callback_data=f"date:{(today + timedelta(1)).isoformat()}"),
+        InlineKeyboardButton("📅 Pojutrze", callback_data=f"date:{(today + timedelta(2)).isoformat()}"),
+    ]])
+
+
+def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
+    if not WEBAPP_URL:
+        return None
+    url = f"{WEBAPP_URL}/?uid={uid}"
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📊 Pokaż tabelę", web_app=WebAppInfo(url=url))
+    ]])
+
+
 # ---------- Handlery ----------
 
 HELP = """Beskidzki Agent GSB
@@ -121,13 +141,11 @@ Przyklady:
   Jordanow 20
   Jordanow 20 6
   Babia Gora 15 7:00 2026-05-10
-  Ustron 30
 
-Agent automatycznie dobierze etap GSB.
-Godzina startu jest zapamietywana miedzy zapytaniami (domyslnie 7:00).
+Jesli nie podasz daty - wybierzesz ja przyciskiem.
+Godzina startu jest zapamietywana (domyslnie 7:00).
 
-Mozesz tez wyslac lokalizacje GPS z Telegrama,
-a potem napisac ile km chcesz przejsc.
+Mozesz tez wyslac lokalizacje GPS i napisac ile km.
 
 /help - ta wiadomosc
 """
@@ -149,15 +167,6 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Zapisalem Twoja lokalizacje ({loc.latitude:.4f}, {loc.longitude:.4f}).\n"
         f"Teraz napisz ile km chcesz przejsc, np: 20"
     )
-
-
-def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
-    if not WEBAPP_URL:
-        return None
-    url = f"{WEBAPP_URL}/?uid={uid}"
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("📊 Pokaż tabelę", web_app=WebAppInfo(url=url))
-    ]])
 
 
 async def _send_result(update: Update, text: str, raw: dict | None, uid: str):
@@ -189,10 +198,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lat, lon = _gps_cache.pop(user_id)
             location = f"{lat},{lon}"
             start_hour = _hour_cache.get(user_id, 7)
-            await update.message.reply_text("Szukam trasy i pogody, chwileczke...")
-            result_text, raw = run_agent(location, distance, date.today(), start_hour)
-            uid = f"{user_id}_{int(date.today().strftime('%Y%m%d'))}"
-            await _send_result(update, result_text, raw, uid)
+            _pending[user_id] = {"location": location, "distance": distance, "start_hour": start_hour}
+            await update.message.reply_text(
+                f"Na kiedy sprawdzić pogodę?",
+                reply_markup=_date_keyboard()
+            )
             return
         except ValueError:
             pass
@@ -205,13 +215,66 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     location, distance, trip_date, start_hour = parsed
-    await update.message.reply_text(
-        f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00..."
+
+    # Jeśli data podana wprost — działaj od razu
+    if trip_date is not None:
+        await update.message.reply_text(
+            f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}..."
+        )
+        result_text, raw = run_agent(location, distance, trip_date, start_hour)
+        uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
+        await _send_result(update, result_text, raw, uid)
+    else:
+        # Zapytaj o datę przyciskami
+        _pending[user_id] = {"location": location, "distance": distance, "start_hour": start_hour}
+        await update.message.reply_text(
+            f"Trasa od '{location}', {distance:.0f} km, start {start_hour}:00\nNa kiedy?",
+            reply_markup=_date_keyboard()
+        )
+
+
+async def handle_date_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not query.data.startswith("date:"):
+        return
+
+    trip_date = date.fromisoformat(query.data.split(":")[1])
+    pending = _pending.pop(user_id, None)
+
+    if not pending:
+        await query.edit_message_text("Sesja wygasła. Wyślij zapytanie ponownie.")
+        return
+
+    location = pending["location"]
+    distance = pending["distance"]
+    start_hour = pending["start_hour"]
+
+    await query.edit_message_text(
+        f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}..."
     )
 
     result_text, raw = run_agent(location, distance, trip_date, start_hour)
     uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
-    await _send_result(update, result_text, raw, uid)
+
+    if raw:
+        store_result(uid, raw)
+
+    lines = result_text.split("\n")
+    short = "\n".join(lines[:5])
+    keyboard = _webapp_button(uid)
+
+    if keyboard:
+        await query.message.reply_text(
+            f"```\n{short}\n```\nSzczegóły w tabeli 👇",
+            parse_mode="Markdown",
+            reply_markup=keyboard
+        )
+    else:
+        for chunk in _split(result_text):
+            await query.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
 
 
 def _split(text: str, limit: int = 3800) -> list[str]:
@@ -245,6 +308,7 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CallbackQueryHandler(handle_date_callback, pattern="^date:"))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     print("Bot uruchomiony. Zatrzymaj przez Ctrl+C.")
