@@ -5,10 +5,14 @@ Uruchamiany równolegle z bot.py przez Procfile
 import os
 import json
 import threading
+import requests
 from flask import Flask, request, jsonify, render_template_string
 from pathlib import Path
 
 app = Flask(__name__)
+
+# Strava tokens per user_id
+_strava_tokens: dict[str, dict] = {}
 
 # Przechowujemy ostatnie wyniki per user (w pamięci)
 _results: dict[str, dict] = {}
@@ -321,6 +325,111 @@ def api_store():
     with _lock:
         _results[uid] = data
     return jsonify({"ok": True})
+
+
+STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
+STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
+
+
+@app.route("/strava/callback")
+def strava_callback():
+    """OAuth callback od Strava."""
+    code = request.args.get("code")
+    user_id = request.args.get("state")
+
+    if not code or not user_id:
+        return "Brakuje parametrów.", 400
+
+    # Wymień code na token
+    resp = requests.post("https://www.strava.com/oauth/token", data={
+        "client_id": STRAVA_CLIENT_ID,
+        "client_secret": STRAVA_CLIENT_SECRET,
+        "code": code,
+        "grant_type": "authorization_code",
+    }, timeout=10)
+
+    if resp.status_code != 200:
+        return "Błąd autoryzacji Strava.", 400
+
+    token_data = resp.json()
+    access_token = token_data.get("access_token")
+    athlete = token_data.get("athlete", {})
+
+    # Pobierz ostatnie aktywności (30 dni)
+    import time as _t
+    since = int(_t.time()) - 30 * 86400
+    acts_resp = requests.get(
+        "https://www.strava.com/api/v3/athlete/activities",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params={"after": since, "per_page": 50},
+        timeout=10,
+    )
+    activities = acts_resp.json() if acts_resp.status_code == 200 else []
+
+    # Analizuj aktywności piesze/turystyczne
+    hikes = [a for a in activities if a.get("type") in ("Hike", "Walk", "TrailRun")]
+    recent_km = sum(a.get("distance", 0) for a in hikes) / 1000
+    recent_count = len(hikes)
+
+    # Oblicz średnie tempo km/h
+    avg_pace_kmh = 3.0  # domyślne
+    if hikes:
+        speeds = []
+        for a in hikes:
+            dist = a.get("distance", 0)
+            t = a.get("moving_time", 0)
+            if dist > 0 and t > 0:
+                speeds.append((dist / 1000) / (t / 3600))
+        if speeds:
+            avg_pace_kmh = sum(speeds) / len(speeds)
+
+    # Oceń kondycję
+    if recent_km > 150:
+        fitness = "bardzo dobra"
+    elif recent_km > 80:
+        fitness = "dobra"
+    elif recent_km > 30:
+        fitness = "przeciętna"
+    else:
+        fitness = "niska"
+
+    profile = {
+        "name": f"{athlete.get('firstname', '')} {athlete.get('lastname', '')}".strip(),
+        "athlete_id": athlete.get("id"),
+        "access_token": access_token,
+        "refresh_token": token_data.get("refresh_token"),
+        "stats": {
+            "recent_count": recent_count,
+            "recent_km": round(recent_km, 1),
+        },
+        "avg_pace_kmh": round(avg_pace_kmh, 2),
+        "fitness_level": fitness,
+    }
+
+    with _lock:
+        _strava_tokens[str(user_id)] = profile
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>body{{font-family:sans-serif;text-align:center;padding:40px;background:#0f1117;color:#e8eaf0}}</style>
+</head><body>
+<h2>✅ Połączono ze Stravą!</h2>
+<p>Witaj, {profile["name"]}!</p>
+<p>Kondycja: <strong>{fitness}</strong></p>
+<p>Dystans (30 dni): <strong>{recent_km:.0f} km</strong></p>
+<p>Możesz wrócić do bota Telegram.</p>
+</body></html>"""
+
+
+@app.route("/api/strava/profile/<user_id>")
+def strava_profile(user_id):
+    with _lock:
+        profile = _strava_tokens.get(str(user_id))
+    if not profile:
+        return jsonify({"error": "no profile"}), 404
+    # Nie zwracaj tokenów do bota
+    safe = {k: v for k, v in profile.items() if k not in ("access_token", "refresh_token")}
+    return jsonify(safe)
 
 
 def run_webapp():

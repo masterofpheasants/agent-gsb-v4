@@ -429,10 +429,315 @@ def main():
                     help="Liczba próbek pogodowych (domyślnie: 5)")
     a = ap.parse_args()
 
+<<<<<<< Updated upstream
     res = run(
         a.gpx, a.location, a.distance,
         date.fromisoformat(a.date),
         samples=a.samples, start_hour=a.start_hour, pace_kmh=a.pace,
+=======
+def tool_get_named_place(lat: float, lon: float) -> dict:
+    return {"name": _reverse_geocode(lat, lon), "lat": lat, "lon": lon}
+
+
+def tool_get_soil_condition(lat: float, lon: float, trip_date: str) -> dict:
+    try:
+        from soil import get_soil
+        soil = get_soil(lat, lon, date.fromisoformat(trip_date))
+        return {
+            "level": soil.level,
+            "precip_3d_mm": soil.precip_3d,
+            "summary": soil.summary,
+        }
+    except Exception as e:
+        return {"level": "nieznany", "error": str(e)}
+
+
+def tool_get_pois(lat_min: float, lon_min: float, lat_max: float, lon_max: float) -> dict:
+    try:
+        bbox = f"{lat_min},{lon_min},{lat_max},{lon_max}"
+        query = f"""
+[out:json][timeout:15];
+(
+  node["natural"="peak"]({bbox});
+  node["natural"="saddle"]({bbox});
+  node["mountain_pass"="yes"]({bbox});
+);
+out body;
+"""
+        r = requests.post("https://overpass-api.de/api/interpreter",
+                          data={"data": query}, timeout=20, verify=False)
+        r.raise_for_status()
+        elements = r.json().get("elements", [])
+        pois = []
+        for el in elements:
+            tags = el.get("tags", {})
+            name = tags.get("name") or tags.get("name:pl") or ""
+            kind = "przełęcz" if (tags.get("mountain_pass") == "yes" or
+                                   tags.get("natural") == "saddle") else "szczyt"
+            if name:
+                pois.append({"name": name, "kind": kind,
+                             "lat": el["lat"], "lon": el["lon"]})
+        return {"pois": pois[:15]}
+    except Exception as e:
+        return {"pois": [], "error": str(e)}
+
+
+TOOL_MAP = {
+    "get_trail_segment": tool_get_trail_segment,
+    "get_weather": tool_get_weather,
+    "get_surface_info": tool_get_surface_info,
+    "get_named_place": tool_get_named_place,
+    "get_soil_condition": tool_get_soil_condition,
+    "get_pois": tool_get_pois,
+}
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_trail_segment",
+            "description": "Wycina odcinek trasy GSB od podanej lokalizacji.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"},
+                    "distance_km": {"type": "number"},
+                    "start_hour": {"type": "integer"},
+                },
+                "required": ["location", "distance_km"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Prognoza pogody dla punktu w danym dniu i godzinie.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number"},
+                    "lon": {"type": "number"},
+                    "trip_date": {"type": "string"},
+                    "eta_hour": {"type": "integer"},
+                },
+                "required": ["lat", "lon", "trip_date", "eta_hour"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_surface_info",
+            "description": "Nawierzchnia i SAC scale dla punktu.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number"},
+                    "lon": {"type": "number"},
+                },
+                "required": ["lat", "lon"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_named_place",
+            "description": "Nazwa miejsca dla współrzędnych.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number"},
+                    "lon": {"type": "number"},
+                },
+                "required": ["lat", "lon"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_soil_condition",
+            "description": "Wilgotność gleby.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat": {"type": "number"},
+                    "lon": {"type": "number"},
+                    "trip_date": {"type": "string"},
+                },
+                "required": ["lat", "lon", "trip_date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_pois",
+            "description": "Szczyty i przełęcze z OSM.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lat_min": {"type": "number"},
+                    "lon_min": {"type": "number"},
+                    "lat_max": {"type": "number"},
+                    "lon_max": {"type": "number"},
+                },
+                "required": ["lat_min", "lon_min", "lat_max", "lon_max"],
+            },
+        },
+    },
+]
+
+SYSTEM_PROMPT = """Jesteś Beskidzkim Agentem GSB — doświadczonym przewodnikiem górskim.
+
+Pomagasz planować jednodniowe odcinki Głównego Szlaku Beskidzkiego (GSB).
+
+Workflow:
+1. Wywołaj get_trail_segment → dostaniesz punkty trasy
+2. Dla każdego punktu wywołaj get_weather
+3. Dla kluczowych punktów wywołaj get_surface_info i get_named_place
+4. Wywołaj get_soil_condition dla środka trasy
+
+Po zebraniu danych zwróć WYŁĄCZNIE obiekt JSON (bez żadnego tekstu przed ani po):
+
+{
+  "start_name": "nazwa startu",
+  "date": "YYYY-MM-DD",
+  "length_km": 24.0,
+  "ascent_m": 1061,
+  "dist_to_trail_km": 0.0,
+  "soil_summary": "opis wilgotności gleby",
+  "recommendation": "Idź / Skróć trasę / Zostań w domu",
+  "recommendation_reason": "krótkie uzasadnienie po polsku",
+  "warnings": ["lista ostrzeżeń jeśli są"],
+  "rows": [
+    {
+      "km": 0.0,
+      "eta": "07:00",
+      "t": 1.0,
+      "mm": 0.3,
+      "wind": 14.8,
+      "sky": "słaby śnieg",
+      "surface": "grunt",
+      "slickness": "ok",
+      "sac": "",
+      "place": "Wołosate"
+    }
+  ],
+  "summary": "krótkie podsumowanie pogody np. -3–6°C · Σ0.6 mm · wiatr max 20 km/h"
+}
+
+Pole slickness oblicz sam na podstawie: powierzchni, opadów i wilgotności gleby:
+- twarda nawierzchnia + mm<=3 → "ok"
+- twarda nawierzchnia + mm>3 → "mokro"
+- miękka + sucho → "ok"  
+- miękka + lekko mokro → "lekko mokro"
+- miękka + mokro lub nasączone → "mokro"
+- miękka + błoto lub nasączone+deszcz → "SLISKO!"
+
+Zwróć TYLKO JSON. Żadnego tekstu, komentarzy ani markdown."""
+
+
+# ============================================================
+# PĘTLA AGENTA
+# ============================================================
+
+def run_agent(location: str, distance_km: float, trip_date: date,
+              start_hour: int = 7, groq_api_key: str = "") -> dict:
+    import os, time
+    api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        raise ValueError("Brak GROQ_API_KEY w zmiennych środowiskowych")
+
+    strava_info = ""
+    if strava_profile:
+        strava_info = (
+            f"\n\nProfil Strava użytkownika:"
+            f"\n- Kondycja: {strava_profile.get('fitness_level', 'nieznana')}"
+            f"\n- Średnie tempo: {strava_profile.get('avg_pace_kmh', 3.0):.1f} km/h"
+            f"\n- Dystans ostatnie 30 dni: {strava_profile.get('stats', {}).get('recent_km', 0):.0f} km"
+            f"\nUwzględnij kondycję przy rekomendacji dystansu i tempa."
+        )
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": (
+            f"Zaplanuj wędrówkę GSB:\n"
+            f"Start: {location}\n"
+            f"Dystans: {distance_km} km\n"
+            f"Data: {trip_date.isoformat()}\n"
+            f"Godzina startu: {start_hour}:00"
+            f"{strava_info}"
+        )},
+    ]
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    for _ in range(15):
+        payload = {
+            "model": GROQ_MODEL,
+            "messages": messages,
+            "tools": TOOLS,
+            "tool_choice": "auto",
+            "max_tokens": 4096,
+            "temperature": 0.2,
+        }
+
+        resp = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=60)
+        if resp.status_code == 429:
+            time.sleep(10)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        messages.append(msg)
+
+        if not msg.get("tool_calls"):
+            content = msg.get("content", "")
+            # Parsuj JSON z odpowiedzi
+            try:
+                # Usuń ewentualne ```json fences
+                clean = content.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("```")[1]
+                    if clean.startswith("json"):
+                        clean = clean[4:]
+                return json.loads(clean.strip())
+            except Exception:
+                return {"agent_response": content, "rows": [], "summary": ""}
+
+        for tc in msg["tool_calls"]:
+            fn_name = tc["function"]["name"]
+            fn_args = json.loads(tc["function"]["arguments"])
+            fn = TOOL_MAP.get(fn_name)
+            result = fn(**fn_args) if fn else {"error": f"Nieznane narzędzie: {fn_name}"}
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+
+    return {"agent_response": "Agent przekroczył limit rund.", "rows": [], "summary": ""}
+
+
+# ============================================================
+# KOMPATYBILNOŚĆ Z BOT.PY
+# ============================================================
+
+def run(gpx_path, location, distance_km, day, samples=5, start_hour=7, pace_kmh=3.0, strava_profile=None):
+    import os
+    result = run_agent(
+        location=location,
+        distance_km=distance_km,
+        trip_date=day,
+        start_hour=start_hour,
+        groq_api_key=os.environ.get("GROQ_API_KEY", ""),
+>>>>>>> Stashed changes
     )
     print(_render(res))
 

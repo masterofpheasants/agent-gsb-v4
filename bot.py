@@ -11,7 +11,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+<<<<<<< Updated upstream
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+=======
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+>>>>>>> Stashed changes
 
 load_dotenv()
 
@@ -23,7 +27,15 @@ logging.basicConfig(
 )
 
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "")
+STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
 
+<<<<<<< Updated upstream
+=======
+_hour_cache: dict[int, int] = {}
+_gps_cache: dict[int, tuple[float, float]] = {}
+_pending: dict[int, dict] = {}
+
+>>>>>>> Stashed changes
 
 # ---------- Helpers ----------
 
@@ -32,7 +44,11 @@ def parse_message(text: str):
     if len(parts) < 2:
         return None
 
+<<<<<<< Updated upstream
     trip_date = date.today()
+=======
+    trip_date = None
+>>>>>>> Stashed changes
     if len(parts) >= 3:
         try:
             trip_date = date.fromisoformat(parts[-1])
@@ -64,10 +80,31 @@ def store_result(uid: str, data: dict):
         logging.warning(f"Nie mozna zapisac wyniku do webapp: {e}")
 
 
+<<<<<<< Updated upstream
 def run_agent(location: str, distance: float, trip_date: date):
     """Odpala agenta, zwraca (tekst, dict_surowy)."""
+=======
+def get_strava_profile(user_id: int) -> dict | None:
+    """Pobiera profil Strava użytkownika z webapp API."""
+    if not WEBAPP_URL:
+        return None
+    try:
+        resp = http_requests.get(
+            f"{WEBAPP_URL}/api/strava/profile/{user_id}",
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def run_agent(location: str, distance: float, trip_date: date, start_hour: int = 7, user_id: int = 0):
+>>>>>>> Stashed changes
     try:
         from agent import run, _render, _narrative, _slickness
+        strava = get_strava_profile(user_id) if user_id else None
         result = run(
             gpx_path=GPX_PATH,
             location=location,
@@ -76,11 +113,12 @@ def run_agent(location: str, distance: float, trip_date: date):
             samples=5,
             start_hour=8,
             pace_kmh=3.0,
+            strava_profile=strava,
         )
         for w in result.get("rows", []):
             w["slickness"] = _slickness(w)
         result["narrative"] = _narrative(result.get("rows", []))
-        result["soil_summary"] = result["rows"][0].get("soil_summary", "") if result.get("rows") else ""
+        result["soil_summary"] = result.get("soil_summary", "")
         return _render(result), result
     except ValueError as e:
         return f"Blad: {e}", None
@@ -107,6 +145,8 @@ Przyklady:
 Mozesz tez wyslac lokalizacje GPS z Telegrama,
 a potem napisac ile km chcesz przejsc.
 
+/connect_strava - polacz konto Strava
+/strava - pokaz swoj profil Strava
 /help - ta wiadomosc
 """
 
@@ -119,6 +159,51 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(HELP)
+
+
+async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not STRAVA_CLIENT_ID or not WEBAPP_URL:
+        await update.message.reply_text("Integracja ze Strava nie jest skonfigurowana.")
+        return
+
+    callback_url = f"{WEBAPP_URL}/strava/callback"
+    auth_url = (
+        f"https://www.strava.com/oauth/authorize"
+        f"?client_id={STRAVA_CLIENT_ID}"
+        f"&redirect_uri={callback_url}"
+        f"&response_type=code"
+        f"&scope=activity:read_all"
+        f"&state={user_id}"
+    )
+    await update.message.reply_text(
+        "Kliknij poniższy link aby połączyć konto Strava:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🏃 Połącz ze Strava", url=auth_url)
+        ]])
+    )
+
+
+async def cmd_strava(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    profile = get_strava_profile(user_id)
+    if not profile:
+        await update.message.reply_text(
+            "Nie masz połączonego konta Strava.\nUżyj /connect_strava"
+        )
+        return
+
+    stats = profile.get("stats", {})
+    pace = profile.get("avg_pace_kmh", 0)
+    fitness = profile.get("fitness_level", "nieznany")
+
+    await update.message.reply_text(
+        f"🏃 Strava: {profile.get('name', '')}\n"
+        f"Kondycja: {fitness}\n"
+        f"Średnie tempo: {pace:.1f} km/h\n"
+        f"Aktywności (30 dni): {stats.get('recent_count', 0)}\n"
+        f"Dystans (30 dni): {stats.get('recent_km', 0):.0f} km"
+    )
 
 
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,10 +253,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             distance = float(text)
             lat, lon = _gps_cache.pop(user_id)
             location = f"{lat},{lon}"
+<<<<<<< Updated upstream
             await update.message.reply_text("Szukam trasy i pogody, chwileczke...")
             result_text, raw = run_agent(location, distance, date.today())
             uid = f"{user_id}_{int(date.today().strftime('%Y%m%d'))}"
             await _send_result(update, result_text, raw, uid)
+=======
+            start_hour = _hour_cache.get(user_id, 7)
+            _pending[user_id] = {"location": location, "distance": distance, "start_hour": start_hour}
+            await update.message.reply_text(
+                "Na kiedy sprawdzić pogodę?",
+                reply_markup=_date_keyboard()
+            )
+>>>>>>> Stashed changes
             return
         except ValueError:
             pass
@@ -186,7 +280,49 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     location, distance, trip_date = parsed
     await update.message.reply_text(f"Szukam trasy od '{location}' na {distance:.0f} km...")
 
+<<<<<<< Updated upstream
     result_text, raw = run_agent(location, distance, trip_date)
+=======
+    if trip_date is not None:
+        await update.message.reply_text(
+            f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}..."
+        )
+        result_text, raw = run_agent(location, distance, trip_date, start_hour, user_id)
+        uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
+        await _send_result(update, result_text, raw, uid)
+    else:
+        _pending[user_id] = {"location": location, "distance": distance, "start_hour": start_hour}
+        await update.message.reply_text(
+            f"Trasa od '{location}', {distance:.0f} km, start {start_hour}:00\nNa kiedy?",
+            reply_markup=_date_keyboard()
+        )
+
+
+async def handle_date_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not query.data.startswith("date:"):
+        return
+
+    trip_date = date.fromisoformat(query.data.split(":")[1])
+    pending = _pending.pop(user_id, None)
+
+    if not pending:
+        await query.edit_message_text("Sesja wygasła. Wyślij zapytanie ponownie.")
+        return
+
+    location = pending["location"]
+    distance = pending["distance"]
+    start_hour = pending["start_hour"]
+
+    await query.edit_message_text(
+        f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}..."
+    )
+
+    result_text, raw = run_agent(location, distance, trip_date, start_hour, user_id)
+>>>>>>> Stashed changes
     uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
     await _send_result(update, result_text, raw, uid)
 
@@ -225,6 +361,12 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+<<<<<<< Updated upstream
+=======
+    app.add_handler(CommandHandler("connect_strava", cmd_connect_strava))
+    app.add_handler(CommandHandler("strava", cmd_strava))
+    app.add_handler(CallbackQueryHandler(handle_date_callback, pattern="^date:"))
+>>>>>>> Stashed changes
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     print("Bot uruchomiony. Zatrzymaj przez Ctrl+C.")
