@@ -1,9 +1,5 @@
 """
 Beskidzki Agent — moduł pogody
-
-Użycie:
-  python agent.py gsb.gpx --from "Wołosate" --distance 24
-  python agent.py gsb.gpx --from "49.3621,22.7012" --distance 15 --date 2026-05-01
 """
 from __future__ import annotations
 
@@ -70,7 +66,6 @@ def load_gpx(path: str | Path) -> list[TrailPoint]:
                 pts.append(tp)
                 prev = tp
     if not pts:
-        # Spróbuj wczytać waypoints jeśli brak tracku
         for wpt in gpx.waypoints:
             tp = TrailPoint(wpt.latitude, wpt.longitude, wpt.elevation or 0.0)
             if pts:
@@ -82,73 +77,59 @@ def load_gpx(path: str | Path) -> list[TrailPoint]:
     return pts
 
 
-# ---------- Wybór etapu ----------
+# ---------- Waypoints (named places) ----------
 
-STAGES_DIR = Path(__file__).parent / "mapy" / "GSB_E.gpx"
+WAYPOINTS_PATH = Path(__file__).parent / "mapy" / "GSB_waypoints.gpx"
 
-
-def list_stages() -> list[Path]:
-    """Zwraca posortowaną listę plików GPX z folderu etapy/."""
-    if not STAGES_DIR.exists():
-        return []
-    files = sorted(STAGES_DIR.glob("*.gpx"), key=lambda p: _stage_number(p.name))
-    return files
+# Cache: lista (lat, lon, name)
+_named_places: list[tuple[float, float, str]] | None = None
 
 
-def _stage_number(name: str) -> int:
+def load_named_places() -> list[tuple[float, float, str]]:
+    """Wczytuje waypoints z GSB_waypoints.gpx."""
+    global _named_places
+    if _named_places is not None:
+        return _named_places
+    if not WAYPOINTS_PATH.exists():
+        _named_places = []
+        return _named_places
     try:
-        return int(name.split("_")[0])
-    except (ValueError, IndexError):
-        return 999
-
-
-def find_best_stage(lat: float, lon: float) -> Path | None:
-    """Znajdź etap GPX najbliższy podanej lokalizacji."""
-    stages = list_stages()
-    if not stages:
-        return None
-
-    ref = TrailPoint(lat, lon)
-    best_path = None
-    best_dist = float("inf")
-
-    for path in stages:
-        try:
-            pts = load_gpx(path)
-            # Sprawdź odległość od początku i końca etapu
-            dist_start = _haversine(ref, pts[0])
-            dist_end = _haversine(ref, pts[-1])
-            dist = min(dist_start, dist_end)
-            # Sprawdź też najbliższy punkt na trasie (próbkowanie co 10 punktów)
-            for i in range(0, len(pts), max(1, len(pts) // 20)):
-                d = _haversine(ref, pts[i])
-                if d < dist:
-                    dist = d
-            if dist < best_dist:
-                best_dist = dist
-                best_path = path
-        except Exception:
-            continue
-
-    return best_path
-
-
-def stage_name(path: Path) -> str:
-    """'3_Smerek_Cisna.gpx' → 'Etap 3: Smerek → Cisna'"""
-    stem = path.stem  # np. "3_Smerek_Cisna"
-    parts = stem.split("_")
-    try:
-        num = parts[0]
-        places = " → ".join(p.replace("-", " ") for p in parts[1:])
-        return f"Etap {num}: {places}"
+        with open(WAYPOINTS_PATH, "r", encoding="utf-8") as f:
+            gpx = gpxpy.parse(f)
+        _named_places = [
+            (wpt.latitude, wpt.longitude, wpt.name or "")
+            for wpt in gpx.waypoints
+            if wpt.name
+        ]
     except Exception:
-        return stem
+        _named_places = []
+    return _named_places
+
+
+def nearest_named_place(lat: float, lon: float, max_dist_km: float = 0.5) -> str | None:
+    """Zwraca nazwę najbliższego waypointa lub None jeśli za daleko."""
+    places = load_named_places()
+    if not places:
+        return None
+    ref = TrailPoint(lat, lon)
+    best_name = None
+    best_dist = max_dist_km
+    for plat, plon, name in places:
+        d = _haversine(ref, TrailPoint(plat, plon))
+        if d < best_dist:
+            best_dist = d
+            best_name = name
+    return best_name
+
+
+# ---------- Etap ----------
+
+GPX_PATH = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 
 
 # ---------- Lokalizacja ----------
 
 def parse_location(loc: str) -> tuple[float, float]:
-    """'49.123,22.456' → (lat, lon)   lub   'Wołosate' → Nominatim geocode."""
     parts = loc.split(",")
     if len(parts) == 2:
         try:
@@ -159,7 +140,6 @@ def parse_location(loc: str) -> tuple[float, float]:
 
 
 def geocode(name: str) -> tuple[float, float]:
-    """Miejscowość/szczyt → (lat, lon)."""
     r = requests.get(
         "https://nominatim.openstreetmap.org/search",
         params={"q": name, "format": "json", "limit": 1, "countrycodes": "pl"},
@@ -206,6 +186,14 @@ def sample_evenly(seg: list[TrailPoint], n: int = 5) -> list[TrailPoint]:
 _geo_cache: dict[tuple, str] = {}
 
 
+def resolve_place(lat: float, lon: float) -> str:
+    """Najpierw szuka w named places, fallback do Nominatim."""
+    named = nearest_named_place(lat, lon, max_dist_km=0.5)
+    if named:
+        return named
+    return reverse_geocode(lat, lon)
+
+
 def reverse_geocode(lat: float, lon: float) -> str:
     key = (round(lat, 3), round(lon, 3))
     if key in _geo_cache:
@@ -231,7 +219,7 @@ def reverse_geocode(lat: float, lon: float) -> str:
             or f"{lat:.3f},{lon:.3f}"
         )
         _geo_cache[key] = name
-        _time.sleep(1.1)  # Nominatim: max 1 req/s
+        _time.sleep(1.1)
         return name
     except Exception:
         return f"{lat:.3f},{lon:.3f}"
@@ -285,27 +273,21 @@ def fetch_weather(point: TrailPoint, day: date) -> list[Sample]:
 def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=3.0):
     lat, lon = parse_location(location)
 
-    # Jeśli gpx_path=None, znajdź najlepszy etap automatycznie
     if gpx_path is None:
-        gpx_path = find_best_stage(lat, lon)
-        if gpx_path is None:
-            raise FileNotFoundError("Brak plików GPX w folderze etapy/")
+        gpx_path = GPX_PATH
 
     pts = load_gpx(gpx_path)
-    matched_stage = stage_name(Path(gpx_path))
 
     start_idx = nearest_idx(pts, lat, lon)
     start_pt = pts[start_idx]
-    start_name = reverse_geocode(start_pt.lat, start_pt.lon)
+    start_name = resolve_place(start_pt.lat, start_pt.lon)
     dist_to_trail = _haversine(TrailPoint(lat, lon), start_pt)
 
     seg = get_segment(pts, lat, lon, distance_km)
 
-    # Inteligentne probkowanie: szczyty, przelecze, zmiany terenu
     poi_list = smart_picks(seg, include_peaks=True, include_terrain=True)
     picks_with_meta = picks_to_trailpoints(poi_list, seg)
 
-    # Fallback + uzupelnienie: jesli za malo punktow, dodaj rownomierne
     MIN_POINTS = max(samples, 4)
     if len(picks_with_meta) < MIN_POINTS:
         even = [(p, "", "even") for p in sample_evenly(seg, MIN_POINTS)]
@@ -323,7 +305,11 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
         eta = base.fromtimestamp(base.timestamp() + km_into / pace_kmh * 3600)
         hour = fetch_weather(p, eta.date())
         mid = min(hour, key=lambda s: abs((s.time - eta).total_seconds()))
-        place = poi_name if poi_name and poi_name not in ("start", "koniec") else reverse_geocode(p.lat, p.lon)
+        # Priorytet: poi_name z OSM → named place z GPX → reverse_geocode
+        if poi_name and poi_name not in ("start", "koniec"):
+            place = poi_name
+        else:
+            place = resolve_place(p.lat, p.lon)
         rows.append({
             "km": round(km_into, 1),
             "ele": round(p.ele),
@@ -347,7 +333,6 @@ def run(gpx_path, location, distance_km, day, samples=5, start_hour=8, pace_kmh=
     return {
         "date": day.isoformat(),
         "start_name": start_name,
-        "stage": matched_stage,
         "dist_to_trail_km": round(dist_to_trail, 2),
         "length_km": length_km,
         "ascent_m": ascent,
@@ -390,8 +375,8 @@ def _narrative(rows):
 
 
 def _slickness(row) -> str:
-    mm       = row.get("mm", 0)
-    surface  = row.get("surface", "ground").replace(" *", "").strip()
+    mm = row.get("mm", 0)
+    surface = row.get("surface", "ground").replace(" *", "").strip()
     soil_lvl = row.get("soil", None)
     soil_level = soil_lvl.level if soil_lvl else "sucho"
 
@@ -453,7 +438,6 @@ def _translate_surface(s: str) -> str:
 def _render(r):
     out = [
         f"Lokalizacja: {r['start_name']}  (odl. {r['dist_to_trail_km']} km od szlaku)",
-        f"{r.get('stage', '')}",
         f"Data: {r['date']}   Dystans: {r['length_km']} km   Podejscie: {r['ascent_m']} m",
     ]
 
@@ -489,7 +473,7 @@ def _render(r):
 def main():
     ap = argparse.ArgumentParser(description="Beskidzki Agent — pogoda na trasie GSB")
     ap.add_argument("gpx", nargs="?", default=None,
-                    help="Plik GPX etapu (opcjonalny - jeśli pominięty, agent dobierze etap automatycznie)")
+                    help="Plik GPX trasy (opcjonalny)")
     ap.add_argument("--from", dest="location", required=True,
                     help="Twoja lokalizacja: nazwa miejscowości lub 'lat,lon'")
     ap.add_argument("--distance", type=float, required=True,
