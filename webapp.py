@@ -242,6 +242,12 @@ async function loadData() {
 
 function render(r) {
   const rows = r.rows || [];
+
+  if (r.agent_response && !rows.length) {
+    document.getElementById('app').innerHTML = `<div class="summary-box"><h2>Odpowiedź agenta</h2>${r.agent_response}</div>`;
+    return;
+  }
+
   let html = `
     <div class="header">
       <h1>📍 ${r.start_name || ''}</h1>
@@ -252,6 +258,22 @@ function render(r) {
         ${r.dist_to_trail_km > 0 ? `<span>🔗 ${r.dist_to_trail_km} km od szlaku</span>` : ''}
       </div>
     </div>`;
+
+  if (r.recommendation) {
+    const rec = r.recommendation;
+    const isGo = rec.includes('Idź');
+    const isShorten = rec.includes('Skróć');
+    const cls = isGo ? 'badge-ok' : isShorten ? 'badge-warn' : 'badge-danger';
+    const emoji = isGo ? '✅' : isShorten ? '⚠️' : '🚫';
+    html += `<div class="summary-box">
+      <span class="badge ${cls}">${emoji} ${rec}</span>
+      ${r.recommendation_reason ? `<p style="margin-top:8px;color:var(--muted);font-size:12px">${r.recommendation_reason}</p>` : ''}
+    </div>`;
+  }
+
+  if (r.warnings && r.warnings.length) {
+    r.warnings.forEach(w => { html += `<div class="warning">⚠️ ${w}</div>`; });
+  }
 
   if (r.soil_summary) {
     html += `<div class="soil-box">🌱 ${r.soil_summary}</div>`;

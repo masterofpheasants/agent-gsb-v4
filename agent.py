@@ -1,5 +1,6 @@
 """
 Beskidzki Agent — prawdziwy agent z Groq LLM + tool use
+Zwraca JSON do renderowania w webapp
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from datetime import date
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
+
 import gpxpy
 import requests
 import urllib3
@@ -89,17 +91,21 @@ def _load_named_places() -> list[tuple[float, float, str]]:
 # ---------- Lokalizacja ----------
 
 def _geocode(name: str) -> tuple[float, float]:
-    r = requests.get(
-        "https://nominatim.openstreetmap.org/search",
-        params={"q": name, "format": "json", "limit": 1, "countrycodes": "pl"},
-        headers={"User-Agent": "BeskidzkiAgent/1.0"},
-        timeout=10,
-    )
-    r.raise_for_status()
-    results = r.json()
-    if not results:
-        raise ValueError(f"Nie znaleziono: '{name}'")
-    return float(results[0]["lat"]), float(results[0]["lon"])
+    for params in [
+        {"q": name, "format": "json", "limit": 1, "countrycodes": "pl"},
+        {"q": name, "format": "json", "limit": 1},
+    ]:
+        r = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params=params,
+            headers={"User-Agent": "BeskidzkiAgent/1.0"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        results = r.json()
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    raise ValueError(f"Nie znaleziono: '{name}'")
 
 
 def _parse_location(loc: str) -> tuple[float, float]:
@@ -316,11 +322,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_trail_segment",
-            "description": "Wycina odcinek trasy GSB od podanej lokalizacji. Zwraca punkty z km, lat, lon, ele, eta_hour.",
+            "description": "Wycina odcinek trasy GSB od podanej lokalizacji.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "location": {"type": "string", "description": "Nazwa miejscowości lub 'lat,lon'"},
+                    "location": {"type": "string"},
                     "distance_km": {"type": "number"},
                     "start_hour": {"type": "integer"},
                 },
@@ -332,13 +338,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Prognoza pogody dla punktu (lat, lon) w danym dniu i godzinie.",
+            "description": "Prognoza pogody dla punktu w danym dniu i godzinie.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "lat": {"type": "number"},
                     "lon": {"type": "number"},
-                    "trip_date": {"type": "string", "description": "YYYY-MM-DD"},
+                    "trip_date": {"type": "string"},
                     "eta_hour": {"type": "integer"},
                 },
                 "required": ["lat", "lon", "trip_date", "eta_hour"],
@@ -349,7 +355,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_surface_info",
-            "description": "Nawierzchnia i trudność trasy (SAC scale) dla punktu.",
+            "description": "Nawierzchnia i SAC scale dla punktu.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -364,7 +370,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_named_place",
-            "description": "Nazwa miejsca (szczyt, schronisko, miejscowość) dla współrzędnych.",
+            "description": "Nazwa miejsca dla współrzędnych.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -379,7 +385,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_soil_condition",
-            "description": "Wilgotność gleby — czy szlak będzie błotnisty.",
+            "description": "Wilgotność gleby.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -395,7 +401,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_pois",
-            "description": "Szczyty i przełęcze z OSM dla obszaru trasy.",
+            "description": "Szczyty i przełęcze z OSM.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -417,18 +423,47 @@ Pomagasz planować jednodniowe odcinki Głównego Szlaku Beskidzkiego (GSB).
 Workflow:
 1. Wywołaj get_trail_segment → dostaniesz punkty trasy
 2. Dla każdego punktu wywołaj get_weather
-3. Dla 2-3 kluczowych punktów wywołaj get_surface_info i get_named_place
+3. Dla kluczowych punktów wywołaj get_surface_info i get_named_place
 4. Wywołaj get_soil_condition dla środka trasy
-5. Opcjonalnie get_pois dla obszaru trasy
 
-Następnie napisz odpowiedź po polsku zawierającą:
-- Nagłówek: lokalizacja, data, dystans, przewyższenie
-- Tabelę: km | ETA | °C | mm | wiatr | niebo | podłoże | miejsce
-- Ocenę śliskości i warunków
-- Konkretną rekomendację (idź / skróć / zostań w domu)
-- Ostrzeżenia jeśli są
+Po zebraniu danych zwróć WYŁĄCZNIE obiekt JSON (bez żadnego tekstu przed ani po):
 
-Bądź konkretny. Używaj emoji sparingly."""
+{
+  "start_name": "nazwa startu",
+  "date": "YYYY-MM-DD",
+  "length_km": 24.0,
+  "ascent_m": 1061,
+  "dist_to_trail_km": 0.0,
+  "soil_summary": "opis wilgotności gleby",
+  "recommendation": "Idź / Skróć trasę / Zostań w domu",
+  "recommendation_reason": "krótkie uzasadnienie po polsku",
+  "warnings": ["lista ostrzeżeń jeśli są"],
+  "rows": [
+    {
+      "km": 0.0,
+      "eta": "07:00",
+      "t": 1.0,
+      "mm": 0.3,
+      "wind": 14.8,
+      "sky": "słaby śnieg",
+      "surface": "grunt",
+      "slickness": "ok",
+      "sac": "",
+      "place": "Wołosate"
+    }
+  ],
+  "summary": "krótkie podsumowanie pogody np. -3–6°C · Σ0.6 mm · wiatr max 20 km/h"
+}
+
+Pole slickness oblicz sam na podstawie: powierzchni, opadów i wilgotności gleby:
+- twarda nawierzchnia + mm<=3 → "ok"
+- twarda nawierzchnia + mm>3 → "mokro"
+- miękka + sucho → "ok"  
+- miękka + lekko mokro → "lekko mokro"
+- miękka + mokro lub nasączone → "mokro"
+- miękka + błoto lub nasączone+deszcz → "SLISKO!"
+
+Zwróć TYLKO JSON. Żadnego tekstu, komentarzy ani markdown."""
 
 
 # ============================================================
@@ -436,8 +471,8 @@ Bądź konkretny. Używaj emoji sparingly."""
 # ============================================================
 
 def run_agent(location: str, distance_km: float, trip_date: date,
-              start_hour: int = 7, groq_api_key: str = "") -> str:
-    import os
+              start_hour: int = 7, groq_api_key: str = "") -> dict:
+    import os, time
     api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
     if not api_key:
         raise ValueError("Brak GROQ_API_KEY w zmiennych środowiskowych")
@@ -469,13 +504,27 @@ def run_agent(location: str, distance_km: float, trip_date: date,
         }
 
         resp = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=60)
+        if resp.status_code == 429:
+            time.sleep(10)
+            continue
         resp.raise_for_status()
         data = resp.json()
         msg = data["choices"][0]["message"]
         messages.append(msg)
 
         if not msg.get("tool_calls"):
-            return msg.get("content", "Brak odpowiedzi agenta.")
+            content = msg.get("content", "")
+            # Parsuj JSON z odpowiedzi
+            try:
+                # Usuń ewentualne ```json fences
+                clean = content.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("```")[1]
+                    if clean.startswith("json"):
+                        clean = clean[4:]
+                return json.loads(clean.strip())
+            except Exception:
+                return {"agent_response": content, "rows": [], "summary": ""}
 
         for tc in msg["tool_calls"]:
             fn_name = tc["function"]["name"]
@@ -488,7 +537,7 @@ def run_agent(location: str, distance_km: float, trip_date: date,
                 "content": json.dumps(result, ensure_ascii=False),
             })
 
-    return "Agent przekroczył limit rund."
+    return {"agent_response": "Agent przekroczył limit rund.", "rows": [], "summary": ""}
 
 
 # ============================================================
@@ -497,18 +546,41 @@ def run_agent(location: str, distance_km: float, trip_date: date,
 
 def run(gpx_path, location, distance_km, day, samples=5, start_hour=7, pace_kmh=3.0):
     import os
-    response = run_agent(
+    result = run_agent(
         location=location,
         distance_km=distance_km,
         trip_date=day,
         start_hour=start_hour,
         groq_api_key=os.environ.get("GROQ_API_KEY", ""),
     )
-    return {"agent_response": response, "date": day.isoformat(), "rows": [], "summary": ""}
+    result["date"] = result.get("date", day.isoformat())
+    return result
 
 
 def _render(r: dict) -> str:
-    return r.get("agent_response", "Brak odpowiedzi.")
+    """Fallback tekstowy jeśli brak webapp."""
+    if "agent_response" in r:
+        return r["agent_response"]
+
+    lines = [
+        f"📍 {r.get('start_name', '')}",
+        f"📅 {r.get('date', '')}  📏 {r.get('length_km', '')} km  ⛰️ +{r.get('ascent_m', '')} m",
+    ]
+    if r.get("soil_summary"):
+        lines += ["", f"🌱 {r['soil_summary']}"]
+
+    rec = r.get("recommendation", "")
+    reason = r.get("recommendation_reason", "")
+    if rec:
+        emoji = "✅" if "Idź" in rec else "⚠️" if "Skróć" in rec else "🚫"
+        lines += ["", f"{emoji} {rec}", reason]
+
+    warnings = r.get("warnings", [])
+    if warnings:
+        lines += [""] + [f"⚠️ {w}" for w in warnings]
+
+    lines += ["", r.get("summary", "")]
+    return "\n".join(lines)
 
 
 def _narrative(rows: list) -> str:
@@ -516,7 +588,7 @@ def _narrative(rows: list) -> str:
 
 
 def _slickness(row: dict) -> str:
-    return ""
+    return row.get("slickness", "")
 
 
 # ============================================================
@@ -531,9 +603,10 @@ if __name__ == "__main__":
     ap.add_argument("--date", default=date.today().isoformat())
     ap.add_argument("--start-hour", type=int, default=7)
     a = ap.parse_args()
-    print(run_agent(
+    result = run_agent(
         location=a.location,
         distance_km=a.distance,
         trip_date=date.fromisoformat(a.date),
         start_hour=a.start_hour,
-    ))
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
