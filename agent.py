@@ -1,15 +1,18 @@
 """
-Beskidzki Agent — prawdziwy agent z Groq LLM + tool use
-Zwraca JSON do renderowania w webapp
+Beskidzki Agent GSB
+Python zbiera dane (GPX, pogoda, nawierzchnia, gleba, nazwy).
+LLM tylko ocenia i rekomenduje.
 """
 from __future__ import annotations
 
 import json
 import math
 import time as _time
+import unicodedata
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,7 +27,9 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GPX_PATH = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 WAYPOINTS_PATH = Path(__file__).parent / "mapy" / "GSB_waypoints.gpx"
-SPLIT_THRESHOLD_KM = 30  # trasy dłuższe niż to dzielimy na dwa odcinki
+SPLIT_THRESHOLD_KM = 30
+PACE_KMH = 3.0
+N_SAMPLES = 6
 
 
 # ---------- Model ----------
@@ -37,7 +42,7 @@ class TrailPoint:
     km: float = 0.0
 
 
-# ---------- GPX ----------
+# ---------- Helpers ----------
 
 def _haversine(a: TrailPoint, b: TrailPoint) -> float:
     R = 6371.0
@@ -47,6 +52,12 @@ def _haversine(a: TrailPoint, b: TrailPoint) -> float:
     h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2
     return 2 * R * math.asin(math.sqrt(h))
 
+
+def _normalize(s: str) -> str:
+    return unicodedata.normalize("NFD", s.lower()).encode("ascii", "ignore").decode()
+
+
+# ---------- GPX ----------
 
 _gpx_cache: list[TrailPoint] | None = None
 
@@ -116,13 +127,12 @@ def _parse_location(loc: str) -> tuple[float, float]:
             return float(parts[0].strip()), float(parts[1].strip())
         except ValueError:
             pass
-    # Najpierw szukaj w waypointach GSB
     places = _load_named_places()
-    loc_lower = loc.strip().lower()
+    loc_norm = _normalize(loc.strip())
     for plat, plon, name in places:
-        if name.lower().startswith(loc_lower) or loc_lower in name.lower():
+        name_norm = _normalize(name)
+        if name_norm.startswith(loc_norm) or loc_norm in name_norm:
             return plat, plon
-    # Fallback do Nominatim
     return _geocode(loc)
 
 
@@ -164,33 +174,13 @@ def _reverse_geocode(lat: float, lon: float) -> str:
         return f"{lat:.3f},{lon:.3f}"
 
 
-def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tuple[str, int]:
-    """Znajdź punkt w połowie trasy — zwraca (lat,lon jako string, eta_hour)."""
-    pts = _load_gpx()
-    lat, lon = _parse_location(location)
-    ref = TrailPoint(lat, lon)
-    idx = min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
-    start_km = pts[idx].km
-    half_km = distance_km / 2
-    seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
-    if not seg:
-        return location, start_hour
-
-    # Znajdź punkt w połowie
-    mid_pts = [p for p in seg if p.km <= start_km + half_km]
-    if not mid_pts:
-        return location, start_hour
-    mid_pt = mid_pts[-1]
-    mid_hour = start_hour + int(half_km / 3.0)
-    return f"{mid_pt.lat:.5f},{mid_pt.lon:.5f}", min(mid_hour, 23)
-
-
 # ---------- WMO ----------
 
 WMO = {
     0: "bezchmurnie", 1: "gł. słonecznie", 2: "częściowe zachm.", 3: "zachmurzenie",
     45: "mgła", 48: "mgła osadz.", 51: "mżawka", 53: "mżawka", 55: "silna mżawka",
     61: "słaby deszcz", 63: "deszcz", 65: "ulewny deszcz",
+    66: "marzn. deszcz", 67: "marzn. deszcz",
     71: "słaby śnieg", 73: "śnieg", 75: "silny śnieg", 77: "krupa",
     80: "przelotny deszcz", 81: "przelotny deszcz", 82: "ulewa",
     85: "przelotny śnieg", 86: "silny przel. śnieg",
@@ -208,50 +198,10 @@ SURFACE_PL = {
 
 
 # ============================================================
-# NARZĘDZIA
+# ZBIERANIE DANYCH (Python)
 # ============================================================
 
-def tool_get_trail_segment(location: str, distance_km: float, start_hour: int = 7) -> dict:
-    pts = _load_gpx()
-    lat, lon = _parse_location(location)
-    ref = TrailPoint(lat, lon)
-    idx = min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
-    start_km = pts[idx].km
-    seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
-    if not seg:
-        return {"error": "Odcinek wykracza poza GPX"}
-
-    dist_to_trail = _haversine(ref, pts[idx])
-    ascent = int(sum(max(0, seg[i].ele - seg[i-1].ele) for i in range(1, len(seg))))
-    length_km = round(seg[-1].km - seg[0].km, 1)
-
-    n = 6
-    step = max(1, len(seg) // (n - 1))
-    samples = [seg[min(i * step, len(seg)-1)] for i in range(n)]
-
-    points = []
-    pace_kmh = 3.0
-    for p in samples:
-        km_into = round(p.km - seg[0].km, 1)
-        eta_hour = start_hour + int(km_into / pace_kmh)
-        points.append({
-            "km": km_into,
-            "lat": round(p.lat, 5),
-            "lon": round(p.lon, 5),
-            "ele": round(p.ele),
-            "eta_hour": min(eta_hour, 23),
-        })
-
-    return {
-        "start_name": _reverse_geocode(pts[idx].lat, pts[idx].lon),
-        "dist_to_trail_km": round(dist_to_trail, 2),
-        "length_km": length_km,
-        "ascent_m": ascent,
-        "points": points,
-    }
-
-
-def tool_get_weather(lat: float, lon: float, trip_date: str, eta_hour: int) -> dict:
+def _fetch_weather(lat: float, lon: float, trip_date: date, eta_hour: int) -> dict:
     try:
         r = requests.get(
             "https://api.open-meteo.com/v1/forecast",
@@ -259,7 +209,8 @@ def tool_get_weather(lat: float, lon: float, trip_date: str, eta_hour: int) -> d
                 "latitude": lat, "longitude": lon,
                 "hourly": "temperature_2m,precipitation,wind_speed_10m,weather_code",
                 "timezone": "Europe/Warsaw",
-                "start_date": trip_date, "end_date": trip_date,
+                "start_date": trip_date.isoformat(),
+                "end_date": trip_date.isoformat(),
             },
             timeout=15,
         )
@@ -267,349 +218,280 @@ def tool_get_weather(lat: float, lon: float, trip_date: str, eta_hour: int) -> d
         h = r.json()["hourly"]
         i = min(eta_hour, 23)
         return {
-            "temp_c": h["temperature_2m"][i],
-            "precip_mm": h["precipitation"][i],
-            "wind_kmh": h["wind_speed_10m"][i],
+            "t": h["temperature_2m"][i],
+            "mm": h["precipitation"][i],
+            "wind": h["wind_speed_10m"][i],
             "sky": WMO.get(h["weather_code"][i], "?"),
         }
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        return {"t": 0, "mm": 0, "wind": 0, "sky": "?"}
 
 
-def tool_get_surface_info(lat: float, lon: float) -> dict:
+def _fetch_surface(lat: float, lon: float) -> dict:
     try:
         from surface import get_surface
         info = get_surface(lat, lon)
         surface_raw = getattr(info, "surface", "ground") or "ground"
         return {
             "surface": SURFACE_PL.get(surface_raw.replace(" *", "").strip(), surface_raw),
-            "sac_scale": getattr(info, "sac_scale", None),
-            "sac_label": getattr(info, "sac_label", None),
+            "sac": getattr(info, "sac_label", "") or "",
         }
-    except Exception as e:
-        return {"surface": "grunt", "error": str(e)}
+    except Exception:
+        return {"surface": "grunt", "sac": ""}
 
 
-def tool_get_named_place(lat: float, lon: float) -> dict:
-    return {"name": _reverse_geocode(lat, lon), "lat": lat, "lon": lon}
-
-
-def tool_get_soil_condition(lat: float, lon: float, trip_date: str) -> dict:
+def _fetch_soil(lat: float, lon: float, trip_date: date) -> dict:
     try:
         from soil import get_soil
-        soil = get_soil(lat, lon, date.fromisoformat(trip_date))
-        return {
-            "level": soil.level,
-            "precip_3d_mm": soil.precip_3d,
-            "summary": soil.summary,
-        }
-    except Exception as e:
-        return {"level": "nieznany", "error": str(e)}
+        soil = get_soil(lat, lon, trip_date)
+        return {"level": soil.level, "summary": soil.summary}
+    except Exception:
+        return {"level": "nieznany", "summary": ""}
 
 
-def tool_get_pois(lat_min: float, lon_min: float, lat_max: float, lon_max: float) -> dict:
-    try:
-        bbox = f"{lat_min},{lon_min},{lat_max},{lon_max}"
-        query = f"""
-[out:json][timeout:15];
-(
-  node["natural"="peak"]({bbox});
-  node["natural"="saddle"]({bbox});
-  node["mountain_pass"="yes"]({bbox});
-);
-out body;
-"""
-        r = requests.post("https://overpass-api.de/api/interpreter",
-                          data={"data": query}, timeout=20, verify=False)
-        r.raise_for_status()
-        elements = r.json().get("elements", [])
-        pois = []
-        for el in elements:
-            tags = el.get("tags", {})
-            name = tags.get("name") or tags.get("name:pl") or ""
-            kind = "przełęcz" if (tags.get("mountain_pass") == "yes" or
-                                   tags.get("natural") == "saddle") else "szczyt"
-            if name:
-                pois.append({"name": name, "kind": kind,
-                             "lat": el["lat"], "lon": el["lon"]})
-        return {"pois": pois[:15]}
-    except Exception as e:
-        return {"pois": [], "error": str(e)}
+def _slickness(mm: float, surface: str, soil_level: str) -> str:
+    hard = {"asfalt", "beton", "ubita (żwir)", "utwardzona", "kostka brukowa", "kocie łby"}
+    if surface in hard:
+        return "mokro" if mm > 3 else "ok"
+    if soil_level == "błoto" or (soil_level == "nasączone" and mm > 1):
+        return "SLISKO!"
+    if soil_level == "nasączone" or (soil_level == "lekko mokro" and mm > 1):
+        return "mokro"
+    if mm > 3:
+        return "mokro"
+    if mm > 0:
+        return "lekko mokro"
+    return "ok"
 
 
-TOOL_MAP = {
-    "get_trail_segment": tool_get_trail_segment,
-    "get_weather": tool_get_weather,
-    "get_surface_info": tool_get_surface_info,
-    "get_named_place": tool_get_named_place,
-    "get_soil_condition": tool_get_soil_condition,
-    "get_pois": tool_get_pois,
-}
+def collect_trail_data(location: str, distance_km: float, trip_date: date,
+                       start_hour: int = 7) -> dict:
+    """Python zbiera wszystkie dane o trasie. Bez LLM."""
+    pts = _load_gpx()
+    lat, lon = _parse_location(location)
+    ref = TrailPoint(lat, lon)
+    idx = min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
+    start_pt = pts[idx]
+    dist_to_trail = _haversine(ref, start_pt)
+    start_name = _reverse_geocode(start_pt.lat, start_pt.lon)
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_trail_segment",
-            "description": "Wycina odcinek trasy GSB od podanej lokalizacji.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string"},
-                    "distance_km": {"type": "number"},
-                    "start_hour": {"type": "integer"},
-                },
-                "required": ["location", "distance_km"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Prognoza pogody dla punktu w danym dniu i godzinie.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "lat": {"type": "number"},
-                    "lon": {"type": "number"},
-                    "trip_date": {"type": "string"},
-                    "eta_hour": {"type": "integer"},
-                },
-                "required": ["lat", "lon", "trip_date", "eta_hour"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_surface_info",
-            "description": "Nawierzchnia i SAC scale dla punktu.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "lat": {"type": "number"},
-                    "lon": {"type": "number"},
-                },
-                "required": ["lat", "lon"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_named_place",
-            "description": "Nazwa miejsca dla współrzędnych.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "lat": {"type": "number"},
-                    "lon": {"type": "number"},
-                },
-                "required": ["lat", "lon"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_soil_condition",
-            "description": "Wilgotność gleby.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "lat": {"type": "number"},
-                    "lon": {"type": "number"},
-                    "trip_date": {"type": "string"},
-                },
-                "required": ["lat", "lon", "trip_date"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_pois",
-            "description": "Szczyty i przełęcze z OSM.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "lat_min": {"type": "number"},
-                    "lon_min": {"type": "number"},
-                    "lat_max": {"type": "number"},
-                    "lon_max": {"type": "number"},
-                },
-                "required": ["lat_min", "lon_min", "lat_max", "lon_max"],
-            },
-        },
-    },
-]
+    start_km = start_pt.km
+    seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
+    if not seg:
+        raise ValueError("Odcinek wykracza poza GPX")
 
-SYSTEM_PROMPT = """Jesteś Beskidzkim Agentem GSB — doświadczonym przewodnikiem górskim.
+    ascent = int(sum(max(0, seg[i].ele - seg[i-1].ele) for i in range(1, len(seg))))
+    length_km = round(seg[-1].km - seg[0].km, 1)
 
-Pomagasz planować jednodniowe odcinki Głównego Szlaku Beskidzkiego (GSB).
+    # Równomierne próbkowanie
+    n = N_SAMPLES
+    step = max(1, len(seg) // (n - 1))
+    samples = [seg[min(i * step, len(seg)-1)] for i in range(n)]
 
-Workflow:
-1. Wywołaj get_trail_segment → dostaniesz punkty trasy
-2. Dla każdego punktu wywołaj get_weather
-3. Dla kluczowych punktów wywołaj get_surface_info i get_named_place
-4. Wywołaj get_soil_condition dla środka trasy
+    # Pobierz glebę raz dla środka trasy
+    mid = samples[len(samples)//2]
+    soil = _fetch_soil(mid.lat, mid.lon, trip_date)
 
-Po zebraniu danych zwróć WYŁĄCZNIE obiekt JSON (bez żadnego tekstu przed ani po):
+    rows = []
+    for p in samples:
+        km_into = round(p.km - seg[0].km, 1)
+        eta_hour = min(start_hour + int(km_into / PACE_KMH), 23)
+        eta_str = f"{eta_hour:02d}:00"
+
+        weather = _fetch_weather(p.lat, p.lon, trip_date, eta_hour)
+        surface_info = _fetch_surface(p.lat, p.lon)
+        place = _reverse_geocode(p.lat, p.lon)
+        slick = _slickness(weather["mm"], surface_info["surface"], soil["level"])
+
+        rows.append({
+            "km": km_into,
+            "eta": eta_str,
+            "t": weather["t"],
+            "mm": weather["mm"],
+            "wind": weather["wind"],
+            "sky": weather["sky"],
+            "surface": surface_info["surface"],
+            "sac": surface_info["sac"],
+            "slickness": slick,
+            "place": place,
+            "lat": round(p.lat, 5),
+            "lon": round(p.lon, 5),
+            "ele": round(p.ele),
+        })
+
+    # Podsumowanie statystyczne
+    tmin = min(r["t"] for r in rows)
+    tmax = max(r["t"] for r in rows)
+    precip = sum(r["mm"] for r in rows)
+    wind_max = max(r["wind"] for r in rows)
+    summary = f"{tmin:.0f}–{tmax:.0f}°C · Σ{precip:.1f} mm · wiatr max {wind_max:.0f} km/h"
+
+    return {
+        "date": trip_date.isoformat(),
+        "start_name": start_name,
+        "dist_to_trail_km": round(dist_to_trail, 2),
+        "length_km": length_km,
+        "ascent_m": ascent,
+        "soil_summary": soil["summary"],
+        "rows": rows,
+        "summary": summary,
+        # Pola do wypełnienia przez LLM
+        "recommendation": "",
+        "recommendation_reason": "",
+        "warnings": [],
+    }
+
+
+# ============================================================
+# OCENA LLM
+# ============================================================
+
+LLM_SYSTEM = """Jesteś doświadczonym przewodnikiem górskim GSB.
+Dostajesz gotowe dane o trasie (pogoda, nawierzchnia, gleba).
+Twoje zadanie: ocenić trasę i zwrócić TYLKO JSON:
 
 {
-  "start_name": "nazwa startu",
-  "date": "YYYY-MM-DD",
-  "length_km": 24.0,
-  "ascent_m": 1061,
-  "dist_to_trail_km": 0.0,
-  "soil_summary": "opis wilgotności gleby",
   "recommendation": "Idź / Skróć trasę / Zostań w domu",
-  "recommendation_reason": "krótkie uzasadnienie po polsku",
-  "warnings": ["lista ostrzeżeń jeśli są"],
-  "rows": [
-    {
-      "km": 0.0,
-      "eta": "07:00",
-      "t": 1.0,
-      "mm": 0.3,
-      "wind": 14.8,
-      "sky": "słaby śnieg",
-      "surface": "grunt",
-      "slickness": "ok",
-      "sac": "",
-      "place": "Wołosate"
-    }
-  ],
-  "summary": "krótkie podsumowanie pogody np. -3–6°C · Σ0.6 mm · wiatr max 20 km/h"
+  "recommendation_reason": "1-2 zdania uzasadnienia po polsku",
+  "warnings": ["ostrzeżenie 1", "ostrzeżenie 2"],
+  "slickness_notes": "opcjonalne uwagi o śliskości",
+  "summary_note": "1 zdanie ogólnego wrażenia"
 }
 
-Pole slickness oblicz sam na podstawie: powierzchni, opadów i wilgotności gleby:
-- twarda nawierzchnia + mm<=3 → "ok"
-- twarda nawierzchnia + mm>3 → "mokro"
-- miękka + sucho → "ok"
-- miękka + lekko mokro → "lekko mokro"
-- miękka + mokro lub nasączone → "mokro"
-- miękka + błoto lub nasączone+deszcz → "SLISKO!"
+Kryteria:
+- Idź: dobra pogoda, brak zagrożeń
+- Skróć trasę: opady >5mm lub wiatr >40km/h lub ślisko
+- Zostań w domu: burza, silny mróz <-10°C, ulewny deszcz, SLISKO! na większości trasy
 
-Zwróć TYLKO JSON. Żadnego tekstu, komentarzy ani markdown."""
+Zwróć TYLKO JSON. Żadnego tekstu ani markdown."""
 
 
-# ============================================================
-# PĘTLA AGENTA
-# ============================================================
-
-def run_agent(location: str, distance_km: float, trip_date: date,
-              start_hour: int = 7, groq_api_key: str = "", strava_profile=None) -> dict:
+def llm_evaluate(data: dict, strava_profile=None) -> dict:
+    """LLM ocenia zebrane dane i wypełnia recommendation/warnings."""
     import os, time
-    api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
+    api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
-        raise ValueError("Brak GROQ_API_KEY w zmiennych środowiskowych")
+        return data  # brak klucza — zwróć dane bez oceny
 
     strava_info = ""
     if strava_profile:
         strava_info = (
-            f"\n\nProfil Strava użytkownika:"
-            f"\n- Kondycja: {strava_profile.get('fitness_level', 'nieznana')}"
-            f"\n- Średnie tempo: {strava_profile.get('avg_pace_kmh', 3.0):.1f} km/h"
-            f"\n- Dystans ostatnie 30 dni: {strava_profile.get('stats', {}).get('recent_km', 0):.0f} km"
-            f"\nUwzględnij kondycję przy rekomendacji dystansu i tempa."
+            f"\nKondycja użytkownika: {strava_profile.get('fitness_level', 'nieznana')}, "
+            f"tempo {strava_profile.get('avg_pace_kmh', 3.0):.1f} km/h, "
+            f"dystans 30 dni: {strava_profile.get('stats', {}).get('recent_km', 0):.0f} km."
         )
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": (
-            f"Zaplanuj wędrówkę GSB:\n"
-            f"Start: {location}\n"
-            f"Dystans: {distance_km} km\n"
-            f"Data: {trip_date.isoformat()}\n"
-            f"Godzina startu: {start_hour}:00"
-            f"{strava_info}"
-        )},
-    ]
+    # Przygotuj skrót danych dla LLM
+    rows_summary = []
+    for r in data["rows"]:
+        rows_summary.append(
+            f"km {r['km']:.1f} ({r['eta']}): {r['t']:.0f}°C, {r['mm']:.1f}mm, "
+            f"{r['wind']:.0f}km/h, {r['sky']}, {r['surface']}, śliskość: {r['slickness']}"
+        )
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    prompt = (
+        f"Trasa: {data['start_name']}, {data['length_km']} km, "
+        f"+{data['ascent_m']} m, data: {data['date']}\n"
+        f"Gleba: {data.get('soil_summary', 'nieznana')}\n"
+        f"{strava_info}\n"
+        f"Punkty trasy:\n" + "\n".join(rows_summary)
+    )
 
-    for _ in range(25):
-        payload = {
-            "model": GROQ_MODEL,
-            "messages": messages,
-            "tools": TOOLS,
-            "tool_choice": "auto",
-            "max_tokens": 4096,
-            "temperature": 0.2,
-        }
-
-        resp = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=60)
-        if resp.status_code == 429:
-            time.sleep(10)
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                GROQ_API_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": GROQ_MODEL,
+                    "messages": [
+                        {"role": "system", "content": LLM_SYSTEM},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 512,
+                    "temperature": 0.2,
+                },
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                time.sleep(10)
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            evaluation = json.loads(content.strip())
+            data["recommendation"] = evaluation.get("recommendation", "Idź")
+            data["recommendation_reason"] = evaluation.get("recommendation_reason", "")
+            data["warnings"] = evaluation.get("warnings", [])
+            if evaluation.get("summary_note"):
+                data["summary"] += f" — {evaluation['summary_note']}"
+            return data
+        except Exception:
             continue
-        resp.raise_for_status()
-        data = resp.json()
-        msg = data["choices"][0]["message"]
-        messages.append(msg)
 
-        if not msg.get("tool_calls"):
-            content = msg.get("content", "")
-            try:
-                clean = content.strip()
-                if clean.startswith("```"):
-                    clean = clean.split("```")[1]
-                    if clean.startswith("json"):
-                        clean = clean[4:]
-                return json.loads(clean.strip())
-            except Exception:
-                return {"agent_response": content, "rows": [], "summary": ""}
-
-        for tc in msg["tool_calls"]:
-            fn_name = tc["function"]["name"]
-            fn_args = json.loads(tc["function"]["arguments"])
-            fn = TOOL_MAP.get(fn_name)
-            result = fn(**fn_args) if fn else {"error": f"Nieznane narzędzie: {fn_name}"}
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(result, ensure_ascii=False),
-            })
-
-    return {"agent_response": "Agent przekroczył limit rund.", "rows": [], "summary": ""}
+    return data  # fallback bez oceny
 
 
 # ============================================================
-# PODZIAŁ DŁUGIEJ TRASY
+# GŁÓWNA FUNKCJA
 # ============================================================
+
+def run_segment(location: str, distance_km: float, trip_date: date,
+                start_hour: int = 7, strava_profile=None) -> dict:
+    """Zbierz dane + oceń przez LLM."""
+    data = collect_trail_data(location, distance_km, trip_date, start_hour)
+    return llm_evaluate(data, strava_profile)
+
+
+def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tuple[str, int]:
+    """Znajdź named waypoint najbliższy połowie trasy."""
+    pts = _load_gpx()
+    lat, lon = _parse_location(location)
+    ref = TrailPoint(lat, lon)
+    idx = min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
+    start_km = pts[idx].km
+    half_km = distance_km / 2
+    seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
+    if not seg:
+        return location, start_hour
+
+    mid_pts = [p for p in seg if p.km <= start_km + half_km]
+    if not mid_pts:
+        return location, start_hour
+    mid_pt = mid_pts[-1]
+
+    places = _load_named_places()
+    ref_mid = TrailPoint(mid_pt.lat, mid_pt.lon)
+    best_name, best_dist = None, 5.0
+    for plat, plon, name in places:
+        d = _haversine(ref_mid, TrailPoint(plat, plon))
+        if d < best_dist:
+            best_dist = d
+            best_name = name
+
+    mid_hour = min(start_hour + int(half_km / PACE_KMH), 23)
+    if best_name:
+        return best_name, mid_hour
+    return f"{mid_pt.lat:.5f},{mid_pt.lon:.5f}", mid_hour
+
 
 def run_split(location: str, distance_km: float, trip_date: date,
               start_hour: int = 7, strava_profile=None) -> list[dict]:
-    """
-    Dla tras > SPLIT_THRESHOLD_KM dzieli na dwa odcinki i wywołuje agenta dwukrotnie.
-    Zwraca listę wyników (1 lub 2 elementy).
-    """
-    import os
-    api_key = os.environ.get("GROQ_API_KEY", "")
-
     if distance_km <= SPLIT_THRESHOLD_KM:
-        result = run_agent(location, distance_km, trip_date, start_hour,
-                           api_key, strava_profile)
-        result["date"] = result.get("date", trip_date.isoformat())
+        result = run_segment(location, distance_km, trip_date, start_hour, strava_profile)
         return [result]
 
-    # Podziel na dwa odcinki
     half = round(distance_km / 2, 1)
     mid_location, mid_hour = _midpoint_location(location, distance_km, start_hour)
 
-    # Pierwsza połowa
-    result1 = run_agent(location, half, trip_date, start_hour, api_key, strava_profile)
-    result1["date"] = result1.get("date", trip_date.isoformat())
+    result1 = run_segment(location, half, trip_date, start_hour, strava_profile)
     result1["part"] = 1
     result1["part_label"] = f"Część 1: km 0–{half:.0f}"
 
-    # Druga połowa — start z punktu środkowego
-    result2 = run_agent(mid_location, half, trip_date, mid_hour, api_key, strava_profile)
-    result2["date"] = result2.get("date", trip_date.isoformat())
+    result2 = run_segment(mid_location, half, trip_date, mid_hour, strava_profile)
     result2["part"] = 2
     result2["part_label"] = f"Część 2: km {half:.0f}–{distance_km:.0f}"
 
@@ -620,28 +502,18 @@ def run_split(location: str, distance_km: float, trip_date: date,
 # KOMPATYBILNOŚĆ Z BOT.PY
 # ============================================================
 
-def run(gpx_path, location, distance_km, day, samples=5, start_hour=7, pace_kmh=3.0, strava_profile=None):
-    import os
-    results = run_split(
-        location=location,
-        distance_km=distance_km,
-        trip_date=day,
-        start_hour=start_hour,
-        strava_profile=strava_profile,
-    )
+def run(gpx_path, location, distance_km, day, samples=5, start_hour=7,
+        pace_kmh=3.0, strava_profile=None):
+    results = run_split(location, distance_km, day, start_hour, strava_profile)
     if len(results) == 1:
         return results[0]
-    # Połącz dwa wyniki — zwróć pierwszy z polem "part2"
     combined = results[0]
     combined["part2"] = results[1]
     return combined
 
 
 def _render(r: dict) -> str:
-    """Fallback tekstowy jeśli brak webapp."""
     def _render_single(d: dict) -> str:
-        if "agent_response" in d:
-            return d["agent_response"]
         lines = [
             f"📍 {d.get('start_name', '')}",
             f"📅 {d.get('date', '')}  📏 {d.get('length_km', '')} km  ⛰️ +{d.get('ascent_m', '')} m",
@@ -653,17 +525,14 @@ def _render(r: dict) -> str:
         if rec:
             emoji = "✅" if "Idź" in rec else "⚠️" if "Skróć" in rec else "🚫"
             lines += ["", f"{emoji} {rec}", reason]
-        warnings = d.get("warnings", [])
-        if warnings:
-            lines += [""] + [f"⚠️ {w}" for w in warnings]
+        if d.get("warnings"):
+            lines += [""] + [f"⚠️ {w}" for w in d["warnings"]]
         lines += ["", d.get("summary", "")]
         return "\n".join(lines)
 
     if "part2" in r:
-        label1 = r.get("part_label", "Część 1")
-        label2 = r["part2"].get("part_label", "Część 2")
-        return (f"━━━ {label1} ━━━\n{_render_single(r)}\n\n"
-                f"━━━ {label2} ━━━\n{_render_single(r['part2'])}")
+        return (f"━━━ {r.get('part_label', 'Część 1')} ━━━\n{_render_single(r)}\n\n"
+                f"━━━ {r['part2'].get('part_label', 'Część 2')} ━━━\n{_render_single(r['part2'])}")
     return _render_single(r)
 
 
@@ -680,7 +549,7 @@ def _slickness(row: dict) -> str:
 # ============================================================
 
 if __name__ == "__main__":
-    import argparse, os
+    import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--from", dest="location", required=True)
     ap.add_argument("--distance", type=float, required=True)
