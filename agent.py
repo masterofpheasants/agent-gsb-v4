@@ -115,6 +115,13 @@ def _parse_location(loc: str) -> tuple[float, float]:
             return float(parts[0].strip()), float(parts[1].strip())
         except ValueError:
             pass
+    # Najpierw szukaj w waypointach GSB
+    places = _load_named_places()
+    loc_lower = loc.strip().lower()
+    for plat, plon, name in places:
+        if name.lower().startswith(loc_lower) or loc_lower in name.lower():
+            return plat, plon
+    # Fallback do Nominatim
     return _geocode(loc)
 
 
