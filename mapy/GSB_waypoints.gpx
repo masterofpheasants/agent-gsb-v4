@@ -1,5 +1,590 @@
 <?xml version="1.0" encoding="utf-8"?>
 <gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1" creator="https://mapy.com/">
+	<wpt lat="49.721111" lon="18.815613">
+		<name>Ustroń Zdrój PKP</name>
+	</wpt>
+	<wpt lat="49.719761" lon="18.852460">
+		<name>Schronisko na Równicy</name>
+	</wpt>
+	<wpt lat="49.696728" lon="18.830027">
+		<name>Ustroń Polana</name>
+	</wpt>
+	<wpt lat="49.683211" lon="18.819329">
+		<name>Polana Stokłosica</name>
+	</wpt>
+	<wpt lat="49.678856" lon="18.804603">
+		<name>Wielka Czantoria</name>
+	</wpt>
+	<wpt lat="49.656392" lon="18.809288">
+		<name>Przełęcz Beskidek (684 m)</name>
+	</wpt>
+	<wpt lat="49.639278" lon="18.813741">
+		<name>Schronisko na Soszowie Wielkim</name>
+	</wpt>
+	<wpt lat="49.634082" lon="18.811705">
+		<name>Soszów Wielki</name>
+	</wpt>
+	<wpt lat="49.614347" lon="18.824295">
+		<name>Stożek Mały</name>
+	</wpt>
+	<wpt lat="49.605551" lon="18.823075">
+		<name>Stożek Wielki</name>
+	</wpt>
+	<wpt lat="49.595275" lon="18.838935">
+		<name>Kiczory</name>
+	</wpt>
+	<wpt lat="49.600454" lon="18.860150">
+		<name>Przełęcz Łączecko (774 m)</name>
+	</wpt>
+	<wpt lat="49.606034" lon="18.876969">
+		<name>Beskid (824 m)</name>
+	</wpt>
+	<wpt lat="49.601177" lon="18.896703">
+		<name>Kościół Świętego Krzyża w Istebnej</name>
+	</wpt>
+	<wpt lat="49.601177" lon="18.896703">
+		<name>Kościół Świętego Krzyża w Istebnej</name>
+	</wpt>
+	<wpt lat="49.604058" lon="18.902530">
+		<name>Kubalonka (761 m)</name>
+	</wpt>
+	<wpt lat="49.602909" lon="18.914685">
+		<name>Przełęcz Szarcula (761 m)</name>
+	</wpt>
+	<wpt lat="49.597908" lon="18.922350">
+		<name>Szarcula (803 m)</name>
+	</wpt>
+	<wpt lat="49.594625" lon="18.932551">
+		<name>Beskidek (796 m)</name>
+	</wpt>
+	<wpt lat="49.587891" lon="18.938847">
+		<name>Schronisko Na Stecówce</name>
+	</wpt>
+	<wpt lat="49.585307" lon="18.961253">
+		<name>Stecówka nad Pietroszonką</name>
+	</wpt>
+	<wpt lat="49.588028" lon="18.985334">
+		<name>Karolówka (931 m)</name>
+	</wpt>
+	<wpt lat="49.596353" lon="18.983790">
+		<name>Schronisko PTTK na Przysłopie pod Baranią Górą</name>
+	</wpt>
+	<wpt lat="49.608068" lon="19.007851">
+		<name>Wierch Wisełka (1192 m)</name>
+	</wpt>
+	<wpt lat="49.611478" lon="19.010535">
+		<name>Barania Góra (1220 m)</name>
+	</wpt>
+	<wpt lat="49.612653" lon="19.011765">
+		<name>Skała pod Baranią</name>
+	</wpt>
+	<wpt lat="49.628637" lon="19.016389">
+		<name>Magurka Wiślańska (1140 m)</name>
+	</wpt>
+	<wpt lat="49.630426" lon="19.043122">
+		<name>Magurka Radziechowska (1108 m)</name>
+	</wpt>
+	<wpt lat="49.628269" lon="19.056462">
+		<name>Hala Radziechowska</name>
+	</wpt>
+	<wpt lat="49.618733" lon="19.068706">
+		<name>Glinne (1034 m)</name>
+	</wpt>
+	<wpt lat="49.603409" lon="19.117870">
+		<name>Węgierska Górka</name>
+	</wpt>
+	<wpt lat="49.591980" lon="19.134181">
+		<name>Żabnica</name>
+	</wpt>
+	<wpt lat="49.579059" lon="19.194503">
+		<name>Stacja Turystyczna Abrahamów</name>
+	</wpt>
+	<wpt lat="49.578307" lon="19.213900">
+		<name>Schronisko &quot;Słowianka&quot;</name>
+	</wpt>
+	<wpt lat="49.571960" lon="19.225190">
+		<name>Żabnica</name>
+	</wpt>
+	<wpt lat="49.561051" lon="19.233912">
+		<name>Łańcuchy na szlaku</name>
+	</wpt>
+	<wpt lat="49.552760" lon="19.234425">
+		<name>Studnia, źródło</name>
+	</wpt>
+	<wpt lat="49.549023" lon="19.238167">
+		<name>Martoszka (1288 m)</name>
+	</wpt>
+	<wpt lat="49.536339" lon="19.234791">
+		<name>Rysianka</name>
+	</wpt>
+	<wpt lat="49.531223" lon="19.260637">
+		<name>Trzy Kopce</name>
+	</wpt>
+	<wpt lat="49.535372" lon="19.281402">
+		<name>Palenica (1337 m)</name>
+	</wpt>
+	<wpt lat="49.534855" lon="19.343207">
+		<name>Przed Pilskiem</name>
+	</wpt>
+	<wpt lat="49.527970" lon="19.316799">
+		<name>Pilsko (1557 m)</name>
+	</wpt>
+	<wpt lat="49.531090" lon="19.318797">
+		<name>Góra Pięciu Kopców (1534 m)</name>
+	</wpt>
+	<wpt lat="49.540576" lon="19.318713">
+		<name>Schronisko PTTK na Hali Miziowej</name>
+	</wpt>
+	<wpt lat="49.544971" lon="19.368643">
+		<name>Przełęcz Glinne (804 m)</name>
+	</wpt>
+	<wpt lat="49.574351" lon="19.396074">
+		<name>Beskid Krzyżowski (924 m)</name>
+	</wpt>
+	<wpt lat="49.596771" lon="19.435606">
+		<name>Głuchaczki (830 m)</name>
+	</wpt>
+	<wpt lat="49.613213" lon="19.462482">
+		<name>Mędralowa (1168 m)</name>
+	</wpt>
+	<wpt lat="49.603449" lon="19.474856">
+		<name>Przełęcz Jałowiecka Północna (998 m)</name>
+	</wpt>
+	<wpt lat="49.591640" lon="19.475741">
+		<name>Żywieckie rozstaje</name>
+	</wpt>
+	<wpt lat="49.591640" lon="19.475741">
+		<name>Drogowskaz turystyczny</name>
+	</wpt>
+	<wpt lat="49.587401" lon="19.516684">
+		<name>Markowe Szczawiny</name>
+	</wpt>
+	<wpt lat="49.587788" lon="19.516759">
+		<name>Schronisko PTTK na Markowych Szczawinach</name>
+	</wpt>
+	<wpt lat="49.581508" lon="19.510184">
+		<name>Przełęcz Brona</name>
+	</wpt>
+	<wpt lat="49.573023" lon="19.529330">
+		<name>Babia Góra (1725 m)</name>
+	</wpt>
+	<wpt lat="49.575128" lon="19.540206">
+		<name>Gówniak (1644 m)</name>
+	</wpt>
+	<wpt lat="49.584573" lon="19.563321">
+		<name>Sokolica (1367 m)</name>
+	</wpt>
+	<wpt lat="49.588150" lon="19.582694">
+		<name>Przełęcz Krowiarki (1010 m)</name>
+	</wpt>
+	<wpt lat="49.598049" lon="19.593718">
+		<name>Główniak (1093 m)</name>
+	</wpt>
+	<wpt lat="49.622628" lon="19.589697">
+		<name>Bocianie Gniazdo</name>
+	</wpt>
+	<wpt lat="49.623450" lon="19.619744">
+		<name>Polica (1369 m)</name>
+	</wpt>
+	<wpt lat="49.626317" lon="19.644682">
+		<name>Schronisko PTTK na Hali Krupowej</name>
+	</wpt>
+	<wpt lat="49.628233" lon="19.646831">
+		<name>Kucałowa Przełęcz (1148 m)</name>
+	</wpt>
+	<wpt lat="49.627050" lon="19.654966">
+		<name>Kaplica Matki Bożej Opiekunki Turystów</name>
+	</wpt>
+	<wpt lat="49.637245" lon="19.670978">
+		<name>Urwanica (1106 m)</name>
+	</wpt>
+	<wpt lat="49.642748" lon="19.677759">
+		<name>Krupówka (1045 m)</name>
+	</wpt>
+	<wpt lat="49.647738" lon="19.703574">
+		<name>Naroże (938 m)</name>
+	</wpt>
+	<wpt lat="49.655403" lon="19.726266">
+		<name>Cupel</name>
+	</wpt>
+	<wpt lat="49.645961" lon="19.782839">
+		<name>Bystra Podhalańska</name>
+	</wpt>
+	<wpt lat="49.649073" lon="19.830065">
+		<name>Jordanów Rynek</name>
+	</wpt>
+	<wpt lat="49.637508" lon="19.832535">
+		<name>Jordanów</name>
+	</wpt>
+	<wpt lat="49.619737" lon="19.847766">
+		<name>Wysoka</name>
+	</wpt>
+	<wpt lat="49.630840" lon="19.880150">
+		<name>Skawa</name>
+	</wpt>
+	<wpt lat="49.623275" lon="19.920097">
+		<name>Piłatowa (610 m)</name>
+	</wpt>
+	<wpt lat="49.608550" lon="19.958504">
+		<name>Rabka-Zdrój</name>
+	</wpt>
+	<wpt lat="49.582742" lon="20.008149">
+		<name>Bacówka PTTK na Maciejowej</name>
+	</wpt>
+	<wpt lat="49.577670" lon="20.025071">
+		<name>Bardo (948 m)</name>
+	</wpt>
+	<wpt lat="49.560150" lon="20.039693">
+		<name>Schronisko PTTK na Starych Wierchach</name>
+	</wpt>
+	<wpt lat="49.559443" lon="20.054502">
+		<name>Pudziska (1000 m)</name>
+	</wpt>
+	<wpt lat="49.560174" lon="20.069034">
+		<name>Obidowiec (1106 m)</name>
+	</wpt>
+	<wpt lat="49.549517" lon="20.097733">
+		<name>Rozdziele (1188 m)</name>
+	</wpt>
+	<wpt lat="49.542824" lon="20.111384">
+		<name>Turbacz (1310 m)</name>
+	</wpt>
+	<wpt lat="49.543667" lon="20.118435">
+		<name>Muzeum Kultury i Turystyki Górskiej na Turbaczu</name>
+	</wpt>
+	<wpt lat="49.544637" lon="20.134896">
+		<name>Źródełko Miłości</name>
+	</wpt>
+	<wpt lat="49.544637" lon="20.134896">
+		<name>Źródełko Miłości</name>
+	</wpt>
+	<wpt lat="49.542708" lon="20.146750">
+		<name>Polana Gabrowska</name>
+	</wpt>
+	<wpt lat="49.539935" lon="20.149952">
+		<name>Kiczora</name>
+	</wpt>
+	<wpt lat="49.522324" lon="20.147536">
+		<name>Stus (1126 m)</name>
+	</wpt>
+	<wpt lat="49.512763" lon="20.161660">
+		<name>Czerteż (984 m)</name>
+	</wpt>
+	<wpt lat="49.503940" lon="20.187981">
+		<name>Przełęcz Knurowska/Ochotnicka (846 m)</name>
+	</wpt>
+	<wpt lat="49.501542" lon="20.191056">
+		<name>Turkówka (886 m)</name>
+	</wpt>
+	<wpt lat="49.501198" lon="20.199032">
+		<name>Chałupisko (930 m)</name>
+	</wpt>
+	<wpt lat="49.497902" lon="20.214639">
+		<name>Studzionki</name>
+	</wpt>
+	<wpt lat="49.496432" lon="20.263956">
+		<name>Runek (1004 m)</name>
+	</wpt>
+	<wpt lat="49.490439" lon="20.294227">
+		<name>Kudowski Wierch (1025 m)</name>
+	</wpt>
+	<wpt lat="49.489321" lon="20.338928">
+		<name>Lubań (1211 m)</name>
+	</wpt>
+	<wpt lat="49.486921" lon="20.345933">
+		<name>Średni Groń (1211 m)</name>
+	</wpt>
+	<wpt lat="49.480045" lon="20.362023">
+		<name>Jaworzyna Ligasowska (1064 m)</name>
+	</wpt>
+	<wpt lat="49.468434" lon="20.389611">
+		<name>Brożek (841 m)</name>
+	</wpt>
+	<wpt lat="49.465390" lon="20.402071">
+		<name>Marszałek (827 m)</name>
+	</wpt>
+	<wpt lat="49.443167" lon="20.420190">
+		<name>Kopia Górka (476 m)</name>
+	</wpt>
+	<wpt lat="49.443465" lon="20.429828">
+		<name>Krościenko nad Dunajcem</name>
+	</wpt>
+	<wpt lat="49.460728" lon="20.452492">
+		<name>Groń (803 m)</name>
+	</wpt>
+	<wpt lat="49.466389" lon="20.474541">
+		<name>Dzwonkówka (982 m)</name>
+	</wpt>
+	<wpt lat="49.467252" lon="20.492581">
+		<name>Przysłopy</name>
+	</wpt>
+	<wpt lat="49.472235" lon="20.502743">
+		<name>Rokita (857 m)</name>
+	</wpt>
+	<wpt lat="49.466388" lon="20.555849">
+		<name>Schronisko PTTK na Przehybie</name>
+	</wpt>
+	<wpt lat="49.465611" lon="20.560115">
+		<name>Przehyba (1173 m)</name>
+	</wpt>
+	<wpt lat="49.466918" lon="20.566981">
+		<name>Rozdroże pod Wielką Przehybą</name>
+	</wpt>
+	<wpt lat="49.460351" lon="20.577893">
+		<name>Złomisty Wierch</name>
+	</wpt>
+	<wpt lat="49.452562" lon="20.595629">
+		<name>Mała Radziejowa</name>
+	</wpt>
+	<wpt lat="49.449329" lon="20.604221">
+		<name>Wieża widokowa na Radziejowej</name>
+	</wpt>
+	<wpt lat="49.443437" lon="20.605476">
+		<name>Przełęcz Żłóbki</name>
+	</wpt>
+	<wpt lat="49.438091" lon="20.610616">
+		<name>Wielki Rogacz</name>
+	</wpt>
+	<wpt lat="49.440848" lon="20.629105">
+		<name>Międzyradziejówki (1037 m)</name>
+	</wpt>
+	<wpt lat="49.443816" lon="20.647174">
+		<name>Złotułki (1001 m)</name>
+	</wpt>
+	<wpt lat="49.449550" lon="20.649921">
+		<name>Niemcowa (963 m)</name>
+	</wpt>
+	<wpt lat="49.460415" lon="20.667126">
+		<name>Kordowiec</name>
+	</wpt>
+	<wpt lat="49.437646" lon="21.010560">
+		<name>Mochnaczka</name>
+	</wpt>
+	<wpt lat="49.560499" lon="21.520028">
+		<name>Kąty</name>
+	</wpt>
+	<wpt lat="49.176093" lon="22.438496">
+		<name>Smerek</name>
+	</wpt>
+	<wpt lat="49.105462" lon="22.649733">
+		<name>Ustrzyki Górne</name>
+	</wpt>
+	<wpt lat="49.469275" lon="21.219668">
+		<name>Regietów</name>
+	</wpt>
+	<wpt lat="49.423799" lon="20.885426">
+		<name>Galwiska (1060 m)</name>
+	</wpt>
+	<wpt lat="49.418046" lon="20.895513">
+		<name>Jaworzyna Krynicka (1114 m)</name>
+	</wpt>
+	<wpt lat="49.410802" lon="20.930685">
+		<name>Krynica-Zdrój, pod Jaworzyną</name>
+	</wpt>
+	<wpt lat="49.405861" lon="20.944400">
+		<name>Holica (697 m)</name>
+	</wpt>
+	<wpt lat="49.490184" lon="21.267390">
+		<name>Zdynia</name>
+	</wpt>
+	<wpt lat="49.490047" lon="21.268163">
+		<name>Ośrodek szkoleniowo-wypoczynkowy &quot;U Zosi&quot;; Zdynia</name>
+	</wpt>
+	<wpt lat="49.560442" lon="21.368476">
+		<name>Przełęcz Majdan (625 m)</name>
+	</wpt>
+	<wpt lat="49.066023" lon="22.679327">
+		<name>Wołosate start</name>
+	</wpt>
+	<wpt lat="49.469275" lon="21.219668">
+		<name>Regietów</name>
+	</wpt>
+	<wpt lat="49.486542" lon="20.680267">
+		<name>Rytro</name>
+	</wpt>
+	<wpt lat="49.489005" lon="20.686668">
+		<name>Zamek w Rytrze</name>
+	</wpt>
+	<wpt lat="49.482747" lon="20.702094">
+		<name>Kretówki (722 m)</name>
+	</wpt>
+	<wpt lat="49.492155" lon="20.716071">
+		<name>Schronisko Cyrla</name>
+	</wpt>
+	<wpt lat="49.492155" lon="20.716071">
+		<name>Schronisko Cyrla</name>
+	</wpt>
+	<wpt lat="49.489969" lon="20.733794">
+		<name>Zadnie Góry (968 m)</name>
+	</wpt>
+	<wpt lat="49.487431" lon="20.744345">
+		<name>Jaworzyna Kokuszczańska (966 m)</name>
+	</wpt>
+	<wpt lat="49.480682" lon="20.756931">
+		<name>Przełęcz Bukowina (993 m)</name>
+	</wpt>
+	<wpt lat="49.480130" lon="20.762135">
+		<name>Hala Pisana (1044 m)</name>
+	</wpt>
+	<wpt lat="49.484782" lon="20.794556">
+		<name>Wierch nad Kamieniem (1084 m)</name>
+	</wpt>
+	<wpt lat="49.472859" lon="20.810430">
+		<name>Schronisko PTTK na Hali Łabowskiej</name>
+	</wpt>
+	<wpt lat="49.471165" lon="20.816248">
+		<name>Jawor (1027 m)</name>
+	</wpt>
+	<wpt lat="49.461208" lon="20.842707">
+		<name>Hola (978 m)</name>
+	</wpt>
+	<wpt lat="49.456922" lon="20.849154">
+		<name>Juchówka (949 m)</name>
+	</wpt>
+	<wpt lat="49.454076" lon="20.865503">
+		<name>Przełęcz Potasznia (900 m)</name>
+	</wpt>
+	<wpt lat="49.441212" lon="20.873847">
+		<name>Runek (1080 m)</name>
+	</wpt>
+	<wpt lat="49.438267" lon="20.874717">
+		<name>Czubakowska (1082 m)</name>
+	</wpt>
+	<wpt lat="49.415507" lon="20.955948">
+		<name>Informacja turystyczna Krynica-Zdrój</name>
+	</wpt>
+	<wpt lat="49.418018" lon="20.974091">
+		<name>Krynica-Zdrój</name>
+	</wpt>
+	<wpt lat="49.414284" lon="20.992357">
+		<name>Huzary (864 m)</name>
+	</wpt>
+	<wpt lat="49.437049" lon="21.011420">
+		<name>Sklep Spożywczy Wiki, Mochnaczka</name>
+	</wpt>
+	<wpt lat="49.462332" lon="21.047157">
+		<name>Opalówka</name>
+	</wpt>
+	<wpt lat="49.456983" lon="21.081312">
+		<name>Schron turystyczny &quot;Lipka&quot;</name>
+	</wpt>
+	<wpt lat="49.456983" lon="21.081312">
+		<name>Schron turystyczny &quot;Lipka&quot;</name>
+	</wpt>
+	<wpt lat="49.458140" lon="21.121728">
+		<name>Cerkwisko; Ropki</name>
+	</wpt>
+	<wpt lat="49.472521" lon="21.159487">
+		<name>Kaplica w Hańczowej</name>
+	</wpt>
+	<wpt lat="49.460264" lon="21.204531">
+		<name>Kozie Żebro (847 m)</name>
+	</wpt>
+	<wpt lat="49.460264" lon="21.204531">
+		<name>Kozie Żebro (847 m)</name>
+	</wpt>
+	<wpt lat="49.474560" lon="21.235771">
+		<name>Rotunda (771 m)</name>
+	</wpt>
+	<wpt lat="49.500268" lon="21.272602">
+		<name>Bucznik</name>
+	</wpt>
+	<wpt lat="49.500268" lon="21.272602">
+		<name>Bucznik</name>
+	</wpt>
+	<wpt lat="49.504814" lon="21.279067">
+		<name>Popowe Wierchy (684 m)</name>
+	</wpt>
+	<wpt lat="49.506298" lon="21.314032">
+		<name>Kaplica, kapliczka; w Krzywej</name>
+	</wpt>
+	<wpt lat="49.517387" lon="21.352883">
+		<name>Wołowiec</name>
+	</wpt>
+	<wpt lat="49.548522" lon="21.357140">
+		<name>Bacówka PTTK w Bartnem</name>
+	</wpt>
+	<wpt lat="49.548522" lon="21.357140">
+		<name>Bacówka PTTK w Bartnem</name>
+	</wpt>
+	<wpt lat="49.575321" lon="21.366200">
+		<name>Pieczątka Magurskiej Odznaki Terenowej</name>
+	</wpt>
+	<wpt lat="49.570431" lon="21.373824">
+		<name>Magura (829 m)</name>
+	</wpt>
+	<wpt lat="49.575730" lon="21.384265">
+		<name>Studnia, źródło pod Magurą</name>
+	</wpt>
+	<wpt lat="49.575194" lon="21.395045">
+		<name>Polana Świerzowska</name>
+	</wpt>
+	<wpt lat="49.572295" lon="21.412369">
+		<name>Świerzowa (801 m)</name>
+	</wpt>
+	<wpt lat="49.565893" lon="21.434556">
+		<name>Pomierki</name>
+	</wpt>
+	<wpt lat="49.549506" lon="21.437879">
+		<name>Ostrzysz</name>
+	</wpt>
+	<wpt lat="49.545590" lon="21.449885">
+		<name>Kolanin (706 m)</name>
+	</wpt>
+	<wpt lat="49.541469" lon="21.467842">
+		<name>Schron turystyczny, wiata; Kotań</name>
+	</wpt>
+	<wpt lat="49.533083" lon="21.498566">
+		<name>Przełęcz Hałbowska (540 m)</name>
+	</wpt>
+	<wpt lat="49.535003" lon="21.521149">
+		<name>Wołczy Kamień (672 m)</name>
+	</wpt>
+	<wpt lat="49.546365" lon="21.531906">
+		<name>Kozi Horb (469 m)</name>
+	</wpt>
+	<wpt lat="49.561761" lon="21.522647">
+		<name>Pizzeria Chono Tu Kąty</name>
+	</wpt>
+	<wpt lat="49.563143" lon="21.522445">
+		<name>ABC Kąty</name>
+	</wpt>
+	<wpt lat="49.573679" lon="21.531558">
+		<name>Krzyż millenijny / Platforma widokowa</name>
+	</wpt>
+	<wpt lat="49.561201" lon="21.562987">
+		<name>Wierchowina (628 m)</name>
+	</wpt>
+	<wpt lat="49.547857" lon="21.580603">
+		<name>Polana (651 m)</name>
+	</wpt>
+	<wpt lat="49.522381" lon="21.618706">
+		<name>Pokoje goscinne u Olguni</name>
+	</wpt>
+	<wpt lat="49.532685" lon="21.614699">
+		<name>Gościniec Chyrowianka</name>
+	</wpt>
+	<wpt lat="49.524304" lon="21.617746">
+		<name>Chyrowa; Schron turystyczny, wiata</name>
+	</wpt>
+	<wpt lat="49.512869" lon="21.650042">
+		<name>Czystyny (645 m)</name>
+	</wpt>
+	<wpt lat="49.514281" lon="21.672683">
+		<name>Garb (611 m)</name>
+	</wpt>
+	<wpt lat="49.515164" lon="21.676477">
+		<name>Woda pitna</name>
+	</wpt>
+	<wpt lat="49.515730" lon="21.676053">
+		<name>toaleta</name>
+	</wpt>
+	<wpt lat="49.515140" lon="21.676177">
+		<name>Kościółek &quot;Na Puszczy&quot; św. Jana z Dukli z 1908 r.</name>
+	</wpt>
+	<wpt lat="49.519134" lon="21.681950">
+		<name>Dania Góra (483 m)</name>
+	</wpt>
 	<wpt lat="49.524392" lon="21.705610">
 		<name>Wierzchowiny (584 m)</name>
 	</wpt>
@@ -13,7 +598,7 @@
 		<name>restauracja Lubatowa</name>
 	</wpt>
 	<wpt lat="49.542078" lon="21.761354">
-		<name>Lewiatan</name>
+		<name>Lubatowa; Lewiatan</name>
 	</wpt>
 	<wpt lat="49.544241" lon="21.777772">
 		<name>Za górą</name>
@@ -254,6 +839,9 @@
 	</wpt>
 	<wpt lat="49.057356" lon="22.722058">
 		<name>Łuhy</name>
+	</wpt>
+	<wpt lat="49.646340" lon="19.780235">
+		<name>Super Market Skrzat</name>
 	</wpt>
 </gpx>
 
