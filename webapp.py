@@ -201,6 +201,25 @@ function rainClass(mm) {
   if (mm < 2) return 'light';
   return 'heavy';
 }
+const SURFACE_PL = {
+  asphalt: "asfalt", concrete: "beton", "concrete:lanes": "beton (pasy)",
+  "concrete:plates": "płyty betonowe", paving_stones: "kostka brukowa",
+  sett: "kamień ciosany", cobblestone: "kocie łby",
+  unhewn_cobblestone: "kamień polny", metal: "metal", wood: "drewno",
+  tiles: "płytki", paved: "utwardzona", unpaved: "nieutwardzona",
+  compacted: "ubita (żwir)", fine_gravel: "drobny żwir", gravel: "żwir",
+  pebblestone: "otoczaki", dirt: "ziemia", earth: "ziemia", grass: "trawa",
+  grass_paver: "trawa/kratka", ground: "grunt", mud: "błoto", sand: "piasek",
+  woodchips: "zrębki", snow: "śnieg", ice: "lód", clay: "glina",
+  rock: "skała", roots: "korzenie", stone: "kamień",
+};
+
+function translateSurface(s) {
+  if (!s) return "";
+  const key = s.trim().replace(" *", "");
+  return SURFACE_PL[key] || s;
+}
+
 function slickBadge(slick) {
   if (!slick || slick === '-') return '';
   const s = slick.toLowerCase();
@@ -227,6 +246,12 @@ async function loadData() {
 
 function render(r) {
   const rows = r.rows || [];
+
+  if (r.agent_response && !rows.length) {
+    document.getElementById('app').innerHTML = `<div class="summary-box"><h2>Odpowiedź agenta</h2>${r.agent_response}</div>`;
+    return;
+  }
+
   let html = `
     <div class="header">
       <h1>📍 ${r.start_name || ''}</h1>
@@ -237,6 +262,22 @@ function render(r) {
         ${r.dist_to_trail_km > 0 ? `<span>🔗 ${r.dist_to_trail_km} km od szlaku</span>` : ''}
       </div>
     </div>`;
+
+  if (r.recommendation) {
+    const rec = r.recommendation;
+    const isGo = rec.includes('Idź');
+    const isShorten = rec.includes('Skróć');
+    const cls = isGo ? 'badge-ok' : isShorten ? 'badge-warn' : 'badge-danger';
+    const emoji = isGo ? '✅' : isShorten ? '⚠️' : '🚫';
+    html += `<div class="summary-box">
+      <span class="badge ${cls}">${emoji} ${rec}</span>
+      ${r.recommendation_reason ? `<p style="margin-top:8px;color:var(--muted);font-size:12px">${r.recommendation_reason}</p>` : ''}
+    </div>`;
+  }
+
+  if (r.warnings && r.warnings.length) {
+    r.warnings.forEach(w => { html += `<div class="warning">⚠️ ${w}</div>`; });
+  }
 
   if (r.soil_summary) {
     html += `<div class="soil-box">🌱 ${r.soil_summary}</div>`;
@@ -271,7 +312,7 @@ function render(r) {
       <td class="rain ${rc}">${(+w.mm).toFixed(1)}</td>
       <td>${(+w.wind).toFixed(1)}</td>
       <td class="left">${w.sky || ''}</td>
-      <td class="left">${w.surface || ''}</td>
+      <td class="left">${translateSurface(w.surface || '')}</td>
       <td class="left">${slickBadge(w.slickness || '')}</td>
       <td class="left sac">${w.sac || ''}</td>
     </tr>`;
