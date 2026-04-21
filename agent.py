@@ -539,11 +539,6 @@ def _render(r: dict) -> str:
 def _narrative(rows: list) -> str:
     return ""
 
-
-def _slickness(row: dict) -> str:
-    return row.get("slickness", "")
-
-
 # ============================================================
 # CLI
 # ============================================================
