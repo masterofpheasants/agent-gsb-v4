@@ -114,8 +114,6 @@ def run_agent(location: str, distance: float, trip_date: date, start_hour: int =
             pace_kmh=3.0,
             strava_profile=strava,
         )
-        for w in result.get("rows", []):
-            w["slickness"] = _slickness(w)
         result["narrative"] = _narrative(result.get("rows", []))
         result["soil_summary"] = result.get("soil_summary", "")
         return _render(result), result
