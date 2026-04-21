@@ -102,7 +102,7 @@ def get_strava_profile(user_id: int) -> dict | None:
 
 def run_agent(location: str, distance: float, trip_date: date, start_hour: int = 7, user_id: int = 0):
     try:
-        from agent import run, _render, _narrative, _slickness
+        from agent import run, _render, _narrative
         strava = get_strava_profile(user_id) if user_id else None
         result = run(
             gpx_path=STAGES_DIR,
