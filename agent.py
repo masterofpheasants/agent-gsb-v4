@@ -471,7 +471,7 @@ Zwróć TYLKO JSON. Żadnego tekstu, komentarzy ani markdown."""
 # ============================================================
 
 def run_agent(location: str, distance_km: float, trip_date: date,
-              start_hour: int = 7, groq_api_key: str = "") -> dict:
+              start_hour: int = 7, groq_api_key: str = "", strava_profile=None) -> dict:
     import os, time
     api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
     if not api_key:
