@@ -244,11 +244,66 @@ async function loadData() {
   }
 }
 
+function renderPart(r) {
+  const rows = r.rows || [];
+  let html = "";
+
+  if (r.recommendation) {
+    const rec = r.recommendation;
+    const isGo = rec.includes("Idź");
+    const isShorten = rec.includes("Skróć");
+    const cls = isGo ? "badge-ok" : isShorten ? "badge-warn" : "badge-danger";
+    const emoji = isGo ? "✅" : isShorten ? "⚠️" : "🚫";
+    html += `<div class="summary-box"><span class="badge ${cls}">${emoji} ${rec}</span>${r.recommendation_reason ? `<p style="margin-top:8px;color:var(--muted);font-size:12px">${r.recommendation_reason}</p>` : ""}</div>`;
+  }
+
+  if (r.warnings && r.warnings.length) {
+    r.warnings.forEach(w => { html += `<div class="warning">⚠️ ${w}</div>`; });
+  }
+
+  if (r.soil_summary) html += `<div class="soil-box">🌱 ${r.soil_summary}</div>`;
+
+  html += `<div class="table-wrap"><table><thead><tr>
+    <th class="left">Miejsce</th><th>km</th><th>ETA</th><th>°C</th><th>mm</th><th>km/h</th>
+    <th class="left">Niebo</th><th class="left">Podłoże</th><th class="left">Śliskość</th><th class="left">SAC</th>
+  </tr></thead><tbody>`;
+
+  for (const w of rows) {
+    const tc = tempClass(w.t);
+    const rc = rainClass(w.mm);
+    html += `<tr>
+      <td class="left"><span class="place">${w.place || ""}</span></td>
+      <td class="km">${(+w.km).toFixed(1)}</td>
+      <td class="eta">${w.eta || ""}</td>
+      <td class="temp ${tc}">${Math.round(w.t)}</td>
+      <td class="rain ${rc}">${(+w.mm).toFixed(1)}</td>
+      <td>${(+w.wind).toFixed(1)}</td>
+      <td class="left">${w.sky || ""}</td>
+      <td class="left">${translateSurface(w.surface || "")}</td>
+      <td class="left">${slickBadge(w.slickness || "")}</td>
+      <td class="left sac">${w.sac || ""}</td>
+    </tr>`;
+  }
+  html += `</tbody></table></div>`;
+  if (r.summary) html += `<div class="summary-box"><h2>Podsumowanie</h2>${r.summary}</div>`;
+  return html;
+}
+
 function render(r) {
   const rows = r.rows || [];
 
   if (r.agent_response && !rows.length) {
     document.getElementById('app').innerHTML = `<div class="summary-box"><h2>Odpowiedź agenta</h2>${r.agent_response}</div>`;
+    return;
+  }
+
+  // Jeśli trasa podzielona na dwie części
+  if (r.part2) {
+    document.getElementById('app').innerHTML =
+      `<div class="soil-box" style="text-align:center;font-size:13px">📍 ${r.part_label || 'Część 1'}</div>` +
+      renderPart(r) +
+      `<div class="soil-box" style="text-align:center;font-size:13px;margin-top:12px">📍 ${r.part2.part_label || 'Część 2'}</div>` +
+      renderPart(r.part2);
     return;
   }
 

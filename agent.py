@@ -24,6 +24,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 GPX_PATH = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 WAYPOINTS_PATH = Path(__file__).parent / "mapy" / "GSB_waypoints.gpx"
+SPLIT_THRESHOLD_KM = 30  # trasy dłuższe niż to dzielimy na dwa odcinki
 
 
 # ---------- Model ----------
@@ -161,6 +162,27 @@ def _reverse_geocode(lat: float, lon: float) -> str:
         return name
     except Exception:
         return f"{lat:.3f},{lon:.3f}"
+
+
+def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tuple[str, int]:
+    """Znajdź punkt w połowie trasy — zwraca (lat,lon jako string, eta_hour)."""
+    pts = _load_gpx()
+    lat, lon = _parse_location(location)
+    ref = TrailPoint(lat, lon)
+    idx = min(range(len(pts)), key=lambda i: _haversine(pts[i], ref))
+    start_km = pts[idx].km
+    half_km = distance_km / 2
+    seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
+    if not seg:
+        return location, start_hour
+
+    # Znajdź punkt w połowie
+    mid_pts = [p for p in seg if p.km <= start_km + half_km]
+    if not mid_pts:
+        return location, start_hour
+    mid_pt = mid_pts[-1]
+    mid_hour = start_hour + int(half_km / 3.0)
+    return f"{mid_pt.lat:.5f},{mid_pt.lon:.5f}", min(mid_hour, 23)
 
 
 # ---------- WMO ----------
@@ -465,7 +487,7 @@ Po zebraniu danych zwróć WYŁĄCZNIE obiekt JSON (bez żadnego tekstu przed an
 Pole slickness oblicz sam na podstawie: powierzchni, opadów i wilgotności gleby:
 - twarda nawierzchnia + mm<=3 → "ok"
 - twarda nawierzchnia + mm>3 → "mokro"
-- miękka + sucho → "ok"  
+- miękka + sucho → "ok"
 - miękka + lekko mokro → "lekko mokro"
 - miękka + mokro lub nasączone → "mokro"
 - miękka + błoto lub nasączone+deszcz → "SLISKO!"
@@ -511,7 +533,7 @@ def run_agent(location: str, distance_km: float, trip_date: date,
         "Content-Type": "application/json",
     }
 
-    for _ in range(15):
+    for _ in range(25):
         payload = {
             "model": GROQ_MODEL,
             "messages": messages,
@@ -532,9 +554,7 @@ def run_agent(location: str, distance_km: float, trip_date: date,
 
         if not msg.get("tool_calls"):
             content = msg.get("content", "")
-            # Parsuj JSON z odpowiedzi
             try:
-                # Usuń ewentualne ```json fences
                 clean = content.strip()
                 if clean.startswith("```"):
                     clean = clean.split("```")[1]
@@ -559,46 +579,92 @@ def run_agent(location: str, distance_km: float, trip_date: date,
 
 
 # ============================================================
+# PODZIAŁ DŁUGIEJ TRASY
+# ============================================================
+
+def run_split(location: str, distance_km: float, trip_date: date,
+              start_hour: int = 7, strava_profile=None) -> list[dict]:
+    """
+    Dla tras > SPLIT_THRESHOLD_KM dzieli na dwa odcinki i wywołuje agenta dwukrotnie.
+    Zwraca listę wyników (1 lub 2 elementy).
+    """
+    import os
+    api_key = os.environ.get("GROQ_API_KEY", "")
+
+    if distance_km <= SPLIT_THRESHOLD_KM:
+        result = run_agent(location, distance_km, trip_date, start_hour,
+                           api_key, strava_profile)
+        result["date"] = result.get("date", trip_date.isoformat())
+        return [result]
+
+    # Podziel na dwa odcinki
+    half = round(distance_km / 2, 1)
+    mid_location, mid_hour = _midpoint_location(location, distance_km, start_hour)
+
+    # Pierwsza połowa
+    result1 = run_agent(location, half, trip_date, start_hour, api_key, strava_profile)
+    result1["date"] = result1.get("date", trip_date.isoformat())
+    result1["part"] = 1
+    result1["part_label"] = f"Część 1: km 0–{half:.0f}"
+
+    # Druga połowa — start z punktu środkowego
+    result2 = run_agent(mid_location, half, trip_date, mid_hour, api_key, strava_profile)
+    result2["date"] = result2.get("date", trip_date.isoformat())
+    result2["part"] = 2
+    result2["part_label"] = f"Część 2: km {half:.0f}–{distance_km:.0f}"
+
+    return [result1, result2]
+
+
+# ============================================================
 # KOMPATYBILNOŚĆ Z BOT.PY
 # ============================================================
 
 def run(gpx_path, location, distance_km, day, samples=5, start_hour=7, pace_kmh=3.0, strava_profile=None):
     import os
-    result = run_agent(
+    results = run_split(
         location=location,
         distance_km=distance_km,
         trip_date=day,
         start_hour=start_hour,
-        groq_api_key=os.environ.get("GROQ_API_KEY", ""),
+        strava_profile=strava_profile,
     )
-    result["date"] = result.get("date", day.isoformat())
-    return result
+    if len(results) == 1:
+        return results[0]
+    # Połącz dwa wyniki — zwróć pierwszy z polem "part2"
+    combined = results[0]
+    combined["part2"] = results[1]
+    return combined
 
 
 def _render(r: dict) -> str:
     """Fallback tekstowy jeśli brak webapp."""
-    if "agent_response" in r:
-        return r["agent_response"]
+    def _render_single(d: dict) -> str:
+        if "agent_response" in d:
+            return d["agent_response"]
+        lines = [
+            f"📍 {d.get('start_name', '')}",
+            f"📅 {d.get('date', '')}  📏 {d.get('length_km', '')} km  ⛰️ +{d.get('ascent_m', '')} m",
+        ]
+        if d.get("soil_summary"):
+            lines += ["", f"🌱 {d['soil_summary']}"]
+        rec = d.get("recommendation", "")
+        reason = d.get("recommendation_reason", "")
+        if rec:
+            emoji = "✅" if "Idź" in rec else "⚠️" if "Skróć" in rec else "🚫"
+            lines += ["", f"{emoji} {rec}", reason]
+        warnings = d.get("warnings", [])
+        if warnings:
+            lines += [""] + [f"⚠️ {w}" for w in warnings]
+        lines += ["", d.get("summary", "")]
+        return "\n".join(lines)
 
-    lines = [
-        f"📍 {r.get('start_name', '')}",
-        f"📅 {r.get('date', '')}  📏 {r.get('length_km', '')} km  ⛰️ +{r.get('ascent_m', '')} m",
-    ]
-    if r.get("soil_summary"):
-        lines += ["", f"🌱 {r['soil_summary']}"]
-
-    rec = r.get("recommendation", "")
-    reason = r.get("recommendation_reason", "")
-    if rec:
-        emoji = "✅" if "Idź" in rec else "⚠️" if "Skróć" in rec else "🚫"
-        lines += ["", f"{emoji} {rec}", reason]
-
-    warnings = r.get("warnings", [])
-    if warnings:
-        lines += [""] + [f"⚠️ {w}" for w in warnings]
-
-    lines += ["", r.get("summary", "")]
-    return "\n".join(lines)
+    if "part2" in r:
+        label1 = r.get("part_label", "Część 1")
+        label2 = r["part2"].get("part_label", "Część 2")
+        return (f"━━━ {label1} ━━━\n{_render_single(r)}\n\n"
+                f"━━━ {label2} ━━━\n{_render_single(r['part2'])}")
+    return _render_single(r)
 
 
 def _narrative(rows: list) -> str:
@@ -621,10 +687,11 @@ if __name__ == "__main__":
     ap.add_argument("--date", default=date.today().isoformat())
     ap.add_argument("--start-hour", type=int, default=7)
     a = ap.parse_args()
-    result = run_agent(
+    results = run_split(
         location=a.location,
         distance_km=a.distance,
         trip_date=date.fromisoformat(a.date),
         start_hour=a.start_hour,
     )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    for r in results:
+        print(json.dumps(r, ensure_ascii=False, indent=2))

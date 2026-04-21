@@ -282,8 +282,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     location, distance, trip_date, start_hour = parsed
 
     if trip_date is not None:
+        long_info = " To może chwilę potrwać (długa trasa)... ⏳" if distance > 30 else ""
         await update.message.reply_text(
-            f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}..."
+            f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}...{long_info}"
         )
         result_text, raw = run_agent(location, distance, trip_date, start_hour, user_id)
         uid = f"{user_id}_{location.replace(' ','_')}_{trip_date}"
@@ -315,8 +316,9 @@ async def handle_date_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     distance = pending["distance"]
     start_hour = pending["start_hour"]
 
+    long_info = " To może chwilę potrwać (długa trasa)... ⏳" if distance > 30 else ""
     await query.edit_message_text(
-        f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}..."
+        f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}...{long_info}"
     )
 
     result_text, raw = run_agent(location, distance, trip_date, start_hour, user_id)
