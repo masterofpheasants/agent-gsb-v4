@@ -177,7 +177,7 @@ Godzina startu jest zapamietywana (domyslnie 7:00).
 
 Mozesz tez wyslac lokalizacje GPS i napisac ile km.
 
-/connect_strava - polacz konto Strava
+/connect_strava [dni] - polacz konto Strava (domyslnie 30 dni)
 /strava - pokaz swoj profil Strava
 /set_llm groq|claude|off - wybierz model LLM
 /help - ta wiadomosc
@@ -220,6 +220,13 @@ async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Integracja ze Strava nie jest skonfigurowana.")
         return
 
+    days = 30
+    if context.args:
+        try:
+            days = max(1, min(365, int(context.args[0])))
+        except ValueError:
+            pass
+
     callback_url = f"{WEBAPP_URL}/strava/callback"
     auth_url = (
         f"https://www.strava.com/oauth/authorize"
@@ -227,10 +234,10 @@ async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"&redirect_uri={callback_url}"
         f"&response_type=code"
         f"&scope=activity:read_all"
-        f"&state={user_id}"
+        f"&state={user_id}:{days}"
     )
     await update.message.reply_text(
-        "Kliknij poniższy link aby połączyć konto Strava:",
+        f"Kliknij poniższy link aby połączyć konto Strava (analiza ostatnich {days} dni):",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("🏃 Połącz ze Strava", url=auth_url)
         ]])

@@ -431,7 +431,10 @@ STRAVA_CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "")
 def strava_callback():
     """OAuth callback od Strava."""
     code = request.args.get("code")
-    user_id = request.args.get("state")
+    state = request.args.get("state", "")
+    state_parts = state.split(":")
+    user_id = state_parts[0]
+    days = int(state_parts[1]) if len(state_parts) > 1 else 30
 
     if not code or not user_id:
         return "Brakuje parametrów.", 400
@@ -451,9 +454,9 @@ def strava_callback():
     access_token = token_data.get("access_token")
     athlete = token_data.get("athlete", {})
 
-    # Pobierz ostatnie aktywności (30 dni)
+    # Pobierz ostatnie aktywności
     import time as _t
-    since = int(_t.time()) - 30 * 86400
+    since = int(_t.time()) - days * 86400
     acts_resp = requests.get(
         "https://www.strava.com/api/v3/athlete/activities",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -463,9 +466,7 @@ def strava_callback():
     activities = acts_resp.json() if acts_resp.status_code == 200 else []
 
     # Analizuj aktywności piesze/turystyczne
-    hikes = [a for a in activities if 
-         a.get("type") in ("Hike", "Walk", "TrailRun") and
-         a.get("total_elevation_gain", 0) > 500]
+    hikes = [a for a in activities if a.get("type") in ("Hike", "Walk", "TrailRun")]
     recent_km = sum(a.get("distance", 0) for a in hikes) / 1000
     recent_count = len(hikes)
 
@@ -514,7 +515,7 @@ def strava_callback():
 <h2>✅ Połączono ze Stravą!</h2>
 <p>Witaj, {profile["name"]}!</p>
 <p>Kondycja: <strong>{fitness}</strong></p>
-<p>Dystans (30 dni): <strong>{recent_km:.0f} km</strong></p>
+<p>Dystans ({days} dni): <strong>{recent_km:.0f} km</strong></p>
 <p>Możesz wrócić do bota Telegram.</p>
 </body></html>"""
 
