@@ -261,6 +261,13 @@ function renderPart(r) {
     r.warnings.forEach(w => { html += `<div class="warning">⚠️ ${w}</div>`; });
   }
 
+  if (r.socks && r.socks.length) {
+    const socksText = r.socks.join(", ").toLowerCase();
+    const socksEmoji = socksText.includes("wodoodporne") ? "🧦💧" : 
+                      socksText.includes("przygotuj") ? "🧦🎒" : "🧦";
+    html += `<div class="soil-box">${socksEmoji} ${r.socks.join(" ")}</div>`;
+  }
+
   if (r.soil_summary) html += `<div class="soil-box">🌱 ${r.soil_summary}</div>`;
 
   html += `<div class="table-wrap"><table><thead><tr>
@@ -305,6 +312,13 @@ function render(r) {
       `<div class="soil-box" style="text-align:center;font-size:13px;margin-top:12px">📍 ${r.part2.part_label || 'Część 2'}</div>` +
       renderPart(r.part2);
     return;
+  }
+
+  if (r.socks && r.socks.length) {
+    const socksText = r.socks.join(", ").toLowerCase();
+    const socksEmoji = socksText.includes("wodoodporne") ? "🧦💧" : 
+                      socksText.includes("przygotuj") ? "🧦🎒" : "🧦";
+    html += `<div class="soil-box">${socksEmoji} ${r.socks.join(" ")}</div>`;
   }
 
   let html = `

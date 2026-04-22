@@ -281,7 +281,7 @@ async def _send_result(update: Update, text: str, raw: dict | None, uid: str):
         store_result(uid, raw)
 
     lines = text.split("\n")
-    short = "\n".join(lines[:5])
+    short = text.strip()
     keyboard = _webapp_button(uid)
 
     if keyboard:
