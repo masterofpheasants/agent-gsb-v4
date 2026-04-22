@@ -28,6 +28,7 @@ STRAVA_CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "")
 _hour_cache: dict[int, int] = {}
 _gps_cache: dict[int, tuple[float, float]] = {}
 _pending: dict[int, dict] = {}
+_llm_cache: dict[int, str] = {}  # user_id → "groq" | "claude" | "off"
 
 
 # ---------- Helpers ----------
@@ -99,10 +100,12 @@ def get_strava_profile(user_id: int) -> dict | None:
     return None
 
 
-def run_agent(location: str, distance: float, trip_date: date, start_hour: int = 7, user_id: int = 0):
+def run_agent(location: str, distance: float, trip_date: date,
+              start_hour: int = 7, user_id: int = 0):
     try:
         from agent import run, _render, _narrative
         strava = get_strava_profile(user_id) if user_id else None
+        llm_provider = _llm_cache.get(user_id, "groq")
         result = run(
             gpx_path=STAGES_DIR,
             location=location,
@@ -112,6 +115,7 @@ def run_agent(location: str, distance: float, trip_date: date, start_hour: int =
             start_hour=start_hour,
             pace_kmh=3.0,
             strava_profile=strava,
+            llm_provider=llm_provider,
         )
         result["narrative"] = _narrative(result.get("rows", []))
         result["soil_summary"] = result.get("soil_summary", "")
@@ -144,7 +148,6 @@ def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
 
 
 async def _strava_reminder(update: Update, user_id: int):
-    """Wysyła przypomnienie o połączeniu Strava jeśli brak profilu."""
     if not STRAVA_CLIENT_ID:
         return
     profile = get_strava_profile(user_id)
@@ -176,6 +179,7 @@ Mozesz tez wyslac lokalizacje GPS i napisac ile km.
 
 /connect_strava - polacz konto Strava
 /strava - pokaz swoj profil Strava
+/set_llm groq|claude|off - wybierz model LLM
 /help - ta wiadomosc
 """
 
@@ -186,6 +190,28 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(HELP)
+
+
+async def cmd_set_llm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    args = context.args
+    current = _llm_cache.get(user_id, "groq")
+    if not args or args[0] not in ("groq", "claude", "off"):
+        await update.message.reply_text(
+            f"Użycie: /set_llm groq|claude|off\n"
+            f"Aktualnie: {current}\n\n"
+            f"groq — Llama 3.3 (darmowy)\n"
+            f"claude — Claude Sonnet (płatny, ~$0.01/zapytanie)\n"
+            f"off — bez oceny LLM (tylko dane)"
+        )
+        return
+    _llm_cache[user_id] = args[0]
+    labels = {
+        "groq": "Llama 3.3 via Groq 🆓",
+        "claude": "Claude Sonnet 💰",
+        "off": "wyłączony (tylko dane) ⚡",
+    }
+    await update.message.reply_text(f"✅ LLM ustawiony na: {labels[args[0]]}")
 
 
 async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -326,7 +352,6 @@ async def handle_date_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     distance = pending["distance"]
     start_hour = pending["start_hour"]
 
-    # Sprawdź Strava przed analizą
     strava = get_strava_profile(user_id)
     if not strava and STRAVA_CLIENT_ID:
         await query.message.reply_text(
@@ -391,6 +416,7 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("set_llm", cmd_set_llm))
     app.add_handler(CommandHandler("connect_strava", cmd_connect_strava))
     app.add_handler(CommandHandler("strava", cmd_strava))
     app.add_handler(CallbackQueryHandler(handle_date_callback, pattern="^date:"))

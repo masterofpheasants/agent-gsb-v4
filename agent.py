@@ -2,6 +2,7 @@
 Beskidzki Agent GSB
 Python zbiera dane (GPX, pogoda, nawierzchnia, gleba, nazwy).
 LLM tylko ocenia i rekomenduje.
+Obsługuje: groq / claude / off
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import math
 import time as _time
 import unicodedata
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,6 +26,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "llama-3.3-70b-versatile"
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
 GPX_PATH = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 WAYPOINTS_PATH = Path(__file__).parent / "mapy" / "GSB_waypoints.gpx"
 SPLIT_THRESHOLD_KM = 30
@@ -265,8 +268,14 @@ def _slickness(mm: float, surface: str, soil_level: str) -> str:
 
 
 def collect_trail_data(location: str, distance_km: float, trip_date: date,
-                       start_hour: int = 7) -> dict:
+                       start_hour: int = 7, strava_profile=None) -> dict:
     """Python zbiera wszystkie dane o trasie. Bez LLM."""
+    pace = PACE_KMH
+    if strava_profile:
+        strava_pace = strava_profile.get("avg_pace_kmh", 0)
+        if strava_pace > 0:
+            pace = strava_pace
+
     pts = _load_gpx()
     lat, lon = _parse_location(location)
     ref = TrailPoint(lat, lon)
@@ -283,19 +292,17 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
     ascent = int(sum(max(0, seg[i].ele - seg[i-1].ele) for i in range(1, len(seg))))
     length_km = round(seg[-1].km - seg[0].km, 1)
 
-    # Równomierne próbkowanie
     n = N_SAMPLES
     step = max(1, len(seg) // (n - 1))
     samples = [seg[min(i * step, len(seg)-1)] for i in range(n)]
 
-    # Pobierz glebę raz dla środka trasy
     mid = samples[len(samples)//2]
     soil = _fetch_soil(mid.lat, mid.lon, trip_date)
 
     rows = []
     for p in samples:
         km_into = round(p.km - seg[0].km, 1)
-        eta_hour = min(start_hour + int(km_into / PACE_KMH), 23)
+        eta_hour = min(start_hour + int(km_into / pace), 23)
         eta_str = f"{eta_hour:02d}:00"
 
         weather = _fetch_weather(p.lat, p.lon, trip_date, eta_hour)
@@ -319,7 +326,6 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
             "ele": round(p.ele),
         })
 
-    # Podsumowanie statystyczne
     tmin = min(r["t"] for r in rows)
     tmax = max(r["t"] for r in rows)
     precip = sum(r["mm"] for r in rows)
@@ -335,7 +341,6 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
         "soil_summary": soil["summary"],
         "rows": rows,
         "summary": summary,
-        # Pola do wypełnienia przez LLM
         "recommendation": "",
         "recommendation_reason": "",
         "warnings": [],
@@ -354,7 +359,6 @@ Twoje zadanie: ocenić trasę i zwrócić TYLKO JSON:
   "recommendation": "Idź / Skróć trasę / Zostań w domu",
   "recommendation_reason": "1-2 zdania uzasadnienia po polsku",
   "warnings": ["ostrzeżenie 1", "ostrzeżenie 2"],
-  "slickness_notes": "opcjonalne uwagi o śliskości",
   "summary_note": "1 zdanie ogólnego wrażenia"
 }
 
@@ -366,13 +370,7 @@ Kryteria:
 Zwróć TYLKO JSON. Żadnego tekstu ani markdown."""
 
 
-def llm_evaluate(data: dict, strava_profile=None) -> dict:
-    """LLM ocenia zebrane dane i wypełnia recommendation/warnings."""
-    import os, time
-    api_key = os.environ.get("GROQ_API_KEY", "")
-    if not api_key:
-        return data  # brak klucza — zwróć dane bez oceny
-
+def _build_prompt(data: dict, strava_profile=None) -> str:
     strava_info = ""
     if strava_profile:
         strava_info = (
@@ -380,16 +378,12 @@ def llm_evaluate(data: dict, strava_profile=None) -> dict:
             f"tempo {strava_profile.get('avg_pace_kmh', 3.0):.1f} km/h, "
             f"dystans 30 dni: {strava_profile.get('stats', {}).get('recent_km', 0):.0f} km."
         )
-
-    # Przygotuj skrót danych dla LLM
-    rows_summary = []
-    for r in data["rows"]:
-        rows_summary.append(
-            f"km {r['km']:.1f} ({r['eta']}): {r['t']:.0f}°C, {r['mm']:.1f}mm, "
-            f"{r['wind']:.0f}km/h, {r['sky']}, {r['surface']}, śliskość: {r['slickness']}"
-        )
-
-    prompt = (
+    rows_summary = [
+        f"km {r['km']:.1f} ({r['eta']}): {r['t']:.0f}°C, {r['mm']:.1f}mm, "
+        f"{r['wind']:.0f}km/h, {r['sky']}, {r['surface']}, śliskość: {r['slickness']}"
+        for r in data["rows"]
+    ]
+    return (
         f"Trasa: {data['start_name']}, {data['length_km']} km, "
         f"+{data['ascent_m']} m, data: {data['date']}\n"
         f"Gleba: {data.get('soil_summary', 'nieznana')}\n"
@@ -397,7 +391,32 @@ def llm_evaluate(data: dict, strava_profile=None) -> dict:
         f"Punkty trasy:\n" + "\n".join(rows_summary)
     )
 
-    for attempt in range(3):
+
+def _apply_evaluation(data: dict, content: str) -> dict:
+    try:
+        clean = content.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.startswith("json"):
+                clean = clean[4:]
+        evaluation = json.loads(clean.strip())
+        data["recommendation"] = evaluation.get("recommendation", "Idź")
+        data["recommendation_reason"] = evaluation.get("recommendation_reason", "")
+        data["warnings"] = evaluation.get("warnings", [])
+        if evaluation.get("summary_note"):
+            data["summary"] += f" — {evaluation['summary_note']}"
+    except Exception:
+        pass
+    return data
+
+
+def _llm_evaluate_groq(data: dict, strava_profile=None) -> dict:
+    import os, time
+    api_key = os.environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        return data
+    prompt = _build_prompt(data, strava_profile)
+    for _ in range(3):
         try:
             resp = requests.post(
                 GROQ_API_URL,
@@ -417,22 +436,48 @@ def llm_evaluate(data: dict, strava_profile=None) -> dict:
                 time.sleep(10)
                 continue
             resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            evaluation = json.loads(content.strip())
-            data["recommendation"] = evaluation.get("recommendation", "Idź")
-            data["recommendation_reason"] = evaluation.get("recommendation_reason", "")
-            data["warnings"] = evaluation.get("warnings", [])
-            if evaluation.get("summary_note"):
-                data["summary"] += f" — {evaluation['summary_note']}"
-            return data
+            content = resp.json()["choices"][0]["message"]["content"]
+            return _apply_evaluation(data, content)
         except Exception:
             continue
+    return data
 
-    return data  # fallback bez oceny
+
+def _llm_evaluate_claude(data: dict, strava_profile=None) -> dict:
+    import os
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return data
+    prompt = _build_prompt(data, strava_profile)
+    try:
+        resp = requests.post(
+            CLAUDE_API_URL,
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": CLAUDE_MODEL,
+                "max_tokens": 512,
+                "system": LLM_SYSTEM,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        content = resp.json()["content"][0]["text"]
+        return _apply_evaluation(data, content)
+    except Exception:
+        return data
+
+
+def llm_evaluate(data: dict, strava_profile=None, llm_provider: str = "groq") -> dict:
+    if llm_provider == "off":
+        return data
+    if llm_provider == "claude":
+        return _llm_evaluate_claude(data, strava_profile)
+    return _llm_evaluate_groq(data, strava_profile)
 
 
 # ============================================================
@@ -440,14 +485,13 @@ def llm_evaluate(data: dict, strava_profile=None) -> dict:
 # ============================================================
 
 def run_segment(location: str, distance_km: float, trip_date: date,
-                start_hour: int = 7, strava_profile=None) -> dict:
-    """Zbierz dane + oceń przez LLM."""
-    data = collect_trail_data(location, distance_km, trip_date, start_hour)
-    return llm_evaluate(data, strava_profile)
+                start_hour: int = 7, strava_profile=None,
+                llm_provider: str = "groq") -> dict:
+    data = collect_trail_data(location, distance_km, trip_date, start_hour, strava_profile)
+    return llm_evaluate(data, strava_profile, llm_provider)
 
 
 def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tuple[str, int]:
-    """Znajdź named waypoint najbliższy połowie trasy."""
     pts = _load_gpx()
     lat, lon = _parse_location(location)
     ref = TrailPoint(lat, lon)
@@ -457,12 +501,10 @@ def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tu
     seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
     if not seg:
         return location, start_hour
-
     mid_pts = [p for p in seg if p.km <= start_km + half_km]
     if not mid_pts:
         return location, start_hour
     mid_pt = mid_pts[-1]
-
     places = _load_named_places()
     ref_mid = TrailPoint(mid_pt.lat, mid_pt.lon)
     best_name, best_dist = None, 5.0
@@ -471,7 +513,6 @@ def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tu
         if d < best_dist:
             best_dist = d
             best_name = name
-
     mid_hour = min(start_hour + int(half_km / PACE_KMH), 23)
     if best_name:
         return best_name, mid_hour
@@ -479,19 +520,21 @@ def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tu
 
 
 def run_split(location: str, distance_km: float, trip_date: date,
-              start_hour: int = 7, strava_profile=None) -> list[dict]:
+              start_hour: int = 7, strava_profile=None,
+              llm_provider: str = "groq") -> list[dict]:
     if distance_km <= SPLIT_THRESHOLD_KM:
-        result = run_segment(location, distance_km, trip_date, start_hour, strava_profile)
+        result = run_segment(location, distance_km, trip_date, start_hour,
+                             strava_profile, llm_provider)
         return [result]
 
     half = round(distance_km / 2, 1)
     mid_location, mid_hour = _midpoint_location(location, distance_km, start_hour)
 
-    result1 = run_segment(location, half, trip_date, start_hour, strava_profile)
+    result1 = run_segment(location, half, trip_date, start_hour, strava_profile, llm_provider)
     result1["part"] = 1
     result1["part_label"] = f"Część 1: km 0–{half:.0f}"
 
-    result2 = run_segment(mid_location, half, trip_date, mid_hour, strava_profile)
+    result2 = run_segment(mid_location, half, trip_date, mid_hour, strava_profile, llm_provider)
     result2["part"] = 2
     result2["part_label"] = f"Część 2: km {half:.0f}–{distance_km:.0f}"
 
@@ -503,8 +546,9 @@ def run_split(location: str, distance_km: float, trip_date: date,
 # ============================================================
 
 def run(gpx_path, location, distance_km, day, samples=5, start_hour=7,
-        pace_kmh=3.0, strava_profile=None):
-    results = run_split(location, distance_km, day, start_hour, strava_profile)
+        pace_kmh=3.0, strava_profile=None, llm_provider="groq"):
+    results = run_split(location, distance_km, day, start_hour,
+                        strava_profile, llm_provider)
     if len(results) == 1:
         return results[0]
     combined = results[0]
@@ -539,6 +583,7 @@ def _render(r: dict) -> str:
 def _narrative(rows: list) -> str:
     return ""
 
+
 # ============================================================
 # CLI
 # ============================================================
@@ -550,12 +595,14 @@ if __name__ == "__main__":
     ap.add_argument("--distance", type=float, required=True)
     ap.add_argument("--date", default=date.today().isoformat())
     ap.add_argument("--start-hour", type=int, default=7)
+    ap.add_argument("--llm", default="groq", choices=["groq", "claude", "off"])
     a = ap.parse_args()
     results = run_split(
         location=a.location,
         distance_km=a.distance,
         trip_date=date.fromisoformat(a.date),
         start_hour=a.start_hour,
+        llm_provider=a.llm,
     )
     for r in results:
         print(json.dumps(r, ensure_ascii=False, indent=2))
