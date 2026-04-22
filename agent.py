@@ -343,6 +343,7 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
         "summary": summary,
         "recommendation": "",
         "recommendation_reason": "",
+        "socks": [],
         "warnings": [],
     }
 
@@ -351,7 +352,9 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
 # OCENA LLM
 # ============================================================
 
-LLM_SYSTEM = """Jesteś doświadczonym przewodnikiem górskim GSB.
+LLM_SYSTEM = """Jesteś doświadczonym przewodnikiem górskim Głóównego Szlaku Beskidzkiego.
+Bądź obiektywny, lekko surowy.
+Doradzasz osobie, która niesie plecak ok 8-10 kg. Ma kije trekingowe, ale nie jest zawodowym sportowcem. Idzie w butach trialowych, ma skarpetki wodoodporne.
 Dostajesz gotowe dane o trasie (pogoda, nawierzchnia, gleba).
 Twoje zadanie: ocenić trasę i zwrócić TYLKO JSON:
 
@@ -359,12 +362,15 @@ Twoje zadanie: ocenić trasę i zwrócić TYLKO JSON:
   "recommendation": "Idź / Skróć trasę / Zostań w domu",
   "recommendation_reason": "1-2 zdania uzasadnienia po polsku",
   "warnings": ["ostrzeżenie 1", "ostrzeżenie 2"],
+  "socks": ["zalecane skarpetki: wodoodporne /przygotuj / zwykłe"],
   "summary_note": "1 zdanie ogólnego wrażenia"
 }
 
 Kryteria:
 - Idź: dobra pogoda, brak zagrożeń
 - Skróć trasę: opady >5mm lub wiatr >40km/h lub ślisko
+- Załóż skarpety wodoodporne: jeśli mokro lub gleba nasączona
+- Przygotuj skarpety wodoodporne: jeśli przewidywane są opady lub gleba będzie mokra w środku dnia,
 - Zostań w domu: burza, silny mróz <-10°C, ulewny deszcz, SLISKO! na większości trasy
 
 Zwróć TYLKO JSON. Żadnego tekstu ani markdown."""
@@ -402,6 +408,7 @@ def _apply_evaluation(data: dict, content: str) -> dict:
         evaluation = json.loads(clean.strip())
         data["recommendation"] = evaluation.get("recommendation", "Idź")
         data["recommendation_reason"] = evaluation.get("recommendation_reason", "")
+        data["socks"] = evaluation.get("socks", [])
         data["warnings"] = evaluation.get("warnings", [])
         if evaluation.get("summary_note"):
             data["summary"] += f" — {evaluation['summary_note']}"
@@ -569,6 +576,10 @@ def _render(r: dict) -> str:
         if rec:
             emoji = "✅" if "Idź" in rec else "⚠️" if "Skróć" in rec else "🚫"
             lines += ["", f"{emoji} {rec}", reason]
+        if socks := d.get("socks", []):
+            socks_text = " ".join(socks).lower()
+            emoji = "🧦💧" if "wodoodporne" in socks_text else "🧦🎒" if "przygotuj" in socks_text else "🧦"
+            lines += [""] + [f"🧦 {s}" for s in socks]
         if d.get("warnings"):
             lines += [""] + [f"⚠️ {w}" for w in d["warnings"]]
         lines += ["", d.get("summary", "")]
