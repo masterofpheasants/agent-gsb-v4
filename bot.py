@@ -85,7 +85,6 @@ def store_result(uid: str, data: dict):
 
 
 def get_strava_profile(user_id: int) -> dict | None:
-    """Pobiera profil Strava użytkownika z webapp API."""
     if not WEBAPP_URL:
         return None
     try:
@@ -142,6 +141,18 @@ def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("📊 Pokaż tabelę", web_app=WebAppInfo(url=url))
     ]])
+
+
+async def _strava_reminder(update: Update, user_id: int):
+    """Wysyła przypomnienie o połączeniu Strava jeśli brak profilu."""
+    if not STRAVA_CLIENT_ID:
+        return
+    profile = get_strava_profile(user_id)
+    if not profile:
+        await update.message.reply_text(
+            "💡 Połącz Stravę żeby agent uwzględnił Twoją kondycję: /connect_strava\n"
+            "Analizuję trasę bez danych kondycyjnych..."
+        )
 
 
 # ---------- Handlery ----------
@@ -280,6 +291,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     location, distance, trip_date, start_hour = parsed
 
     if trip_date is not None:
+        await _strava_reminder(update, user_id)
         long_info = " To może chwilę potrwać (długa trasa)... ⏳" if distance > 30 else ""
         await update.message.reply_text(
             f"Szukam trasy od '{location}' na {distance:.0f} km, start {start_hour}:00, {trip_date}...{long_info}"
@@ -313,6 +325,14 @@ async def handle_date_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     location = pending["location"]
     distance = pending["distance"]
     start_hour = pending["start_hour"]
+
+    # Sprawdź Strava przed analizą
+    strava = get_strava_profile(user_id)
+    if not strava and STRAVA_CLIENT_ID:
+        await query.message.reply_text(
+            "💡 Połącz Stravę żeby agent uwzględnił Twoją kondycję: /connect_strava\n"
+            "Analizuję trasę bez danych kondycyjnych..."
+        )
 
     long_info = " To może chwilę potrwać (długa trasa)... ⏳" if distance > 30 else ""
     await query.edit_message_text(

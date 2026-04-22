@@ -463,7 +463,9 @@ def strava_callback():
     activities = acts_resp.json() if acts_resp.status_code == 200 else []
 
     # Analizuj aktywności piesze/turystyczne
-    hikes = [a for a in activities if a.get("type") in ("Hike", "Walk", "TrailRun")]
+    hikes = [a for a in activities if 
+         a.get("type") in ("Hike", "Walk", "TrailRun") and
+         a.get("total_elevation_gain", 0) > 500]
     recent_km = sum(a.get("distance", 0) for a in hikes) / 1000
     recent_count = len(hikes)
 
