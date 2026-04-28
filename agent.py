@@ -2,6 +2,7 @@
 Beskidzki Agent GSB
 Python zbiera dane (GPX, pogoda, nawierzchnia, gleba, nazwy).
 LLM tylko ocenia i rekomenduje.
+ETA obliczane formułą Naismitha z korektą kondycji i nawierzchni.
 Obsługuje: groq / claude / off
 """
 from __future__ import annotations
@@ -31,8 +32,38 @@ CLAUDE_MODEL = "claude-sonnet-4-20250514"
 GPX_PATH = Path(__file__).parent / "mapy" / "GSB_E.gpx"
 WAYPOINTS_PATH = Path(__file__).parent / "mapy" / "GSB_waypoints.gpx"
 SPLIT_THRESHOLD_KM = 30
-PACE_KMH = 3.0
 N_SAMPLES = 6
+
+# Naismith constants
+NAISMITH_FLAT_KMH = 4.0
+NAISMITH_ASCENT_MIN_PER_100M = 10
+NAISMITH_DESCENT_MIN_PER_100M = 7.5
+BREAK_MIN_PER_HOUR = 10
+
+# Mnożniki kondycji
+FITNESS_MULTIPLIER = {
+    "bardzo dobra": 0.85,
+    "dobra": 1.0,
+    "przeciętna": 1.20,
+    "niska": 1.40,
+    "nieznana": 1.10,
+}
+
+# Mnożniki nawierzchni
+SURFACE_MULTIPLIER = {
+    "asfalt": 0.90,
+    "beton": 0.90,
+    "ubita (żwir)": 0.95,
+    "kostka brukowa": 0.95,
+    "żwir": 1.00,
+    "grunt": 1.05,
+    "ziemia": 1.05,
+    "trawa": 1.10,
+    "skała": 1.20,
+    "korzenie": 1.20,
+    "błoto": 1.25,
+    "nieutwardzona": 1.05,
+}
 
 
 # ---------- Model ----------
@@ -43,6 +74,20 @@ class TrailPoint:
     lon: float
     ele: float = 0.0
     km: float = 0.0
+
+
+# ---------- Naismith ETA ----------
+
+def _naismith_minutes(dist_km: float, ascent_m: float, descent_m: float,
+                      surface: str, fitness_level: str) -> float:
+    """Oblicza czas w minutach formułą Naismitha z korektami."""
+    flat_min = (dist_km / NAISMITH_FLAT_KMH) * 60
+    ascent_min = (ascent_m / 100) * NAISMITH_ASCENT_MIN_PER_100M
+    descent_min = (descent_m / 100) * NAISMITH_DESCENT_MIN_PER_100M
+    march_min = (flat_min + ascent_min + descent_min) * SURFACE_MULTIPLIER.get(surface, 1.05)
+    break_min = math.floor(march_min / 60) * BREAK_MIN_PER_HOUR
+    fitness_mult = FITNESS_MULTIPLIER.get(fitness_level, 1.10)
+    return (march_min + break_min) * fitness_mult
 
 
 # ---------- Helpers ----------
@@ -269,12 +314,10 @@ def _slickness(mm: float, surface: str, soil_level: str) -> str:
 
 def collect_trail_data(location: str, distance_km: float, trip_date: date,
                        start_hour: int = 7, strava_profile=None) -> dict:
-    """Python zbiera wszystkie dane o trasie. Bez LLM."""
-    pace = PACE_KMH
+    """Python zbiera wszystkie dane o trasie. ETA obliczane formułą Naismitha."""
+    fitness_level = "nieznana"
     if strava_profile:
-        strava_pace = strava_profile.get("avg_pace_kmh", 0)
-        if strava_pace > 0:
-            pace = strava_pace
+        fitness_level = strava_profile.get("fitness_level", "nieznana")
 
     pts = _load_gpx()
     lat, lon = _parse_location(location)
@@ -290,6 +333,7 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
         raise ValueError("Odcinek wykracza poza GPX")
 
     ascent = int(sum(max(0, seg[i].ele - seg[i-1].ele) for i in range(1, len(seg))))
+    descent = int(sum(max(0, seg[i-1].ele - seg[i].ele) for i in range(1, len(seg))))
     length_km = round(seg[-1].km - seg[0].km, 1)
 
     n = N_SAMPLES
@@ -300,15 +344,33 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
     soil = _fetch_soil(mid.lat, mid.lon, trip_date)
 
     rows = []
-    for p in samples:
+    start_total_min = start_hour * 60
+
+    for i, p in enumerate(samples):
         km_into = round(p.km - seg[0].km, 1)
-        eta_hour = min(start_hour + int(km_into / pace), 23)
-        eta_str = f"{eta_hour:02d}:00"
+
+        # Oblicz przewyższenia od startu do tego punktu
+        seg_to_point = [s for s in seg if s.km <= seg[0].km + km_into]
+        asc_to_point = sum(max(0, seg_to_point[j].ele - seg_to_point[j-1].ele)
+                          for j in range(1, len(seg_to_point))) if len(seg_to_point) > 1 else 0
+        desc_to_point = sum(max(0, seg_to_point[j-1].ele - seg_to_point[j].ele)
+                           for j in range(1, len(seg_to_point))) if len(seg_to_point) > 1 else 0
+
+        # Pobierz nawierzchnię dla obliczenia ETA
+        surface_info = _fetch_surface(p.lat, p.lon)
+        surface_for_eta = surface_info["surface"]
+
+        # Naismith ETA
+        elapsed_min = _naismith_minutes(km_into, asc_to_point, desc_to_point,
+                                        surface_for_eta, fitness_level)
+        eta_total_min = start_total_min + int(elapsed_min)
+        eta_hour = min(eta_total_min // 60, 23)
+        eta_min = eta_total_min % 60
+        eta_str = f"{eta_hour:02d}:{eta_min:02d}"
 
         weather = _fetch_weather(p.lat, p.lon, trip_date, eta_hour)
-        surface_info = _fetch_surface(p.lat, p.lon)
         place = _reverse_geocode(p.lat, p.lon)
-        slick = _slickness(weather["mm"], surface_info["surface"], soil["level"])
+        slick = _slickness(weather["mm"], surface_for_eta, soil["level"])
 
         rows.append({
             "km": km_into,
@@ -317,7 +379,7 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
             "mm": weather["mm"],
             "wind": weather["wind"],
             "sky": weather["sky"],
-            "surface": surface_info["surface"],
+            "surface": surface_for_eta,
             "sac": surface_info["sac"],
             "slickness": slick,
             "place": place,
@@ -332,12 +394,21 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
     wind_max = max(r["wind"] for r in rows)
     summary = f"{tmin:.0f}–{tmax:.0f}°C · Σ{precip:.1f} mm · wiatr max {wind_max:.0f} km/h"
 
+    # Szacowany czas całkowity
+    total_min = int(_naismith_minutes(length_km, ascent, descent, "grunt", fitness_level))
+    total_h = total_min // 60
+    total_m = total_min % 60
+    eta_end_str = f"{min((start_total_min + total_min) // 60, 23):02d}:{(start_total_min + total_min) % 60:02d}"
+
     return {
         "date": trip_date.isoformat(),
         "start_name": start_name,
         "dist_to_trail_km": round(dist_to_trail, 2),
         "length_km": length_km,
         "ascent_m": ascent,
+        "descent_m": descent,
+        "estimated_time": f"{total_h}h {total_m:02d}min",
+        "eta_end": eta_end_str,
         "soil_summary": soil["summary"],
         "rows": rows,
         "summary": summary,
@@ -352,9 +423,9 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
 # OCENA LLM
 # ============================================================
 
-LLM_SYSTEM = """Jesteś doświadczonym przewodnikiem górskim Głóównego Szlaku Beskidzkiego.
+LLM_SYSTEM = """Jesteś doświadczonym przewodnikiem górskim Głównego Szlaku Beskidzkiego.
 Bądź obiektywny, lekko surowy.
-Doradzasz osobie, która niesie plecak ok 8-10 kg. Ma kije trekingowe, ale nie jest zawodowym sportowcem. Idzie w butach trialowych, ma skarpetki wodoodporne.
+Doradzasz osobie, która niesie plecak ok 8-10 kg. Ma kije trekingowe, ale nie jest zawodowym sportowcem. Idzie w butach trailowych, ma skarpetki wodoodporne.
 Dostajesz gotowe dane o trasie (pogoda, nawierzchnia, gleba).
 Twoje zadanie: ocenić trasę i zwrócić TYLKO JSON:
 
@@ -362,7 +433,7 @@ Twoje zadanie: ocenić trasę i zwrócić TYLKO JSON:
   "recommendation": "Idź / Skróć trasę / Zostań w domu",
   "recommendation_reason": "1-2 zdania uzasadnienia po polsku",
   "warnings": ["ostrzeżenie 1", "ostrzeżenie 2"],
-  "socks": ["zalecane skarpetki: wodoodporne /przygotuj / zwykłe"],
+  "socks": ["zalecane skarpetki: wodoodporne / przygotuj / zwykłe"],
   "summary_note": "1 zdanie ogólnego wrażenia"
 }
 
@@ -370,7 +441,7 @@ Kryteria:
 - Idź: dobra pogoda, brak zagrożeń
 - Skróć trasę: opady >5mm lub wiatr >40km/h lub ślisko
 - Załóż skarpety wodoodporne: jeśli mokro lub gleba nasączona
-- Przygotuj skarpety wodoodporne: jeśli przewidywane są opady lub gleba będzie mokra w środku dnia,
+- Przygotuj skarpety wodoodporne: jeśli przewidywane są opady lub gleba będzie mokra w środku dnia
 - Zostań w domu: burza, silny mróz <-10°C, ulewny deszcz, SLISKO! na większości trasy
 
 Zwróć TYLKO JSON. Żadnego tekstu ani markdown."""
@@ -391,7 +462,9 @@ def _build_prompt(data: dict, strava_profile=None) -> str:
     ]
     return (
         f"Trasa: {data['start_name']}, {data['length_km']} km, "
-        f"+{data['ascent_m']} m, data: {data['date']}\n"
+        f"+{data['ascent_m']} m, -{data.get('descent_m', 0)} m, "
+        f"szacowany czas: {data.get('estimated_time', '?')}, "
+        f"koniec ok. {data.get('eta_end', '?')}, data: {data['date']}\n"
         f"Gleba: {data.get('soil_summary', 'nieznana')}\n"
         f"{strava_info}\n"
         f"Punkty trasy:\n" + "\n".join(rows_summary)
@@ -498,7 +571,9 @@ def run_segment(location: str, distance_km: float, trip_date: date,
     return llm_evaluate(data, strava_profile, llm_provider)
 
 
-def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tuple[str, int]:
+def _midpoint_location(location: str, distance_km: float, start_hour: int,
+                       strava_profile=None) -> tuple[str, int]:
+    """Znajdź punkt środkowy trasy z realistycznym ETA (Naismith)."""
     pts = _load_gpx()
     lat, lon = _parse_location(location)
     ref = TrailPoint(lat, lon)
@@ -508,10 +583,21 @@ def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tu
     seg = [p for p in pts[idx:] if p.km <= start_km + distance_km]
     if not seg:
         return location, start_hour
+
     mid_pts = [p for p in seg if p.km <= start_km + half_km]
     if not mid_pts:
         return location, start_hour
     mid_pt = mid_pts[-1]
+
+    # Oblicz ETA do punktu środkowego formułą Naismitha
+    fitness_level = strava_profile.get("fitness_level", "nieznana") if strava_profile else "nieznana"
+    seg_half = mid_pts
+    asc = sum(max(0, seg_half[i].ele - seg_half[i-1].ele) for i in range(1, len(seg_half)))
+    desc = sum(max(0, seg_half[i-1].ele - seg_half[i].ele) for i in range(1, len(seg_half)))
+    elapsed_min = _naismith_minutes(half_km, asc, desc, "grunt", fitness_level)
+    mid_total_min = start_hour * 60 + int(elapsed_min)
+    mid_hour = min(mid_total_min // 60, 23)
+
     places = _load_named_places()
     ref_mid = TrailPoint(mid_pt.lat, mid_pt.lon)
     best_name, best_dist = None, 5.0
@@ -520,7 +606,7 @@ def _midpoint_location(location: str, distance_km: float, start_hour: int) -> tu
         if d < best_dist:
             best_dist = d
             best_name = name
-    mid_hour = min(start_hour + int(half_km / PACE_KMH), 23)
+
     if best_name:
         return best_name, mid_hour
     return f"{mid_pt.lat:.5f},{mid_pt.lon:.5f}", mid_hour
@@ -535,7 +621,7 @@ def run_split(location: str, distance_km: float, trip_date: date,
         return [result]
 
     half = round(distance_km / 2, 1)
-    mid_location, mid_hour = _midpoint_location(location, distance_km, start_hour)
+    mid_location, mid_hour = _midpoint_location(location, distance_km, start_hour, strava_profile)
 
     result1 = run_segment(location, half, trip_date, start_hour, strava_profile, llm_provider)
     result1["part"] = 1
@@ -569,6 +655,8 @@ def _render(r: dict) -> str:
             f"📍 {d.get('start_name', '')}",
             f"📅 {d.get('date', '')}  📏 {d.get('length_km', '')} km  ⛰️ +{d.get('ascent_m', '')} m",
         ]
+        if d.get("estimated_time"):
+            lines += [f"⏱️ Szacowany czas: {d['estimated_time']} (koniec ~{d.get('eta_end', '?')})"]
         if d.get("soil_summary"):
             lines += ["", f"🌱 {d['soil_summary']}"]
         rec = d.get("recommendation", "")
@@ -579,7 +667,7 @@ def _render(r: dict) -> str:
         if socks := d.get("socks", []):
             socks_text = " ".join(socks).lower()
             emoji = "🧦💧" if "wodoodporne" in socks_text else "🧦🎒" if "przygotuj" in socks_text else "🧦"
-            lines += [""] + [f"🧦 {s}" for s in socks]
+            lines += [""] + [f"{emoji} {s}" for s in socks]
         if d.get("warnings"):
             lines += [""] + [f"⚠️ {w}" for w in d["warnings"]]
         lines += ["", d.get("summary", "")]
