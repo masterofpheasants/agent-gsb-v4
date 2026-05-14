@@ -460,6 +460,7 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     user_id = query.from_user.id
     data = query.data
+    logging.warning(f"trail_pts count: {len(trail_pts)}, sample: {trail_pts[:2] if trail_pts else 'EMPTY'}")
 
     # Toggle kategorii
     if data.startswith("poi_toggle:"):
