@@ -166,6 +166,13 @@ HTML = """<!DOCTYPE html>
   .poi-proximity-trail { color: var(--green); font-size: 11px; font-weight: 600; }
   .poi-proximity-near { color: var(--yellow); font-size: 11px; }
   .poi-extra { margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .checkpoint {
+    background: rgba(91,155,213,0.1); border: 1px solid rgba(91,155,213,0.4);
+    border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px;
+    font-size: 12px; color: var(--blue);
+  }
+  .checkpoint strong { font-size: 13px; }
+
   .poi-cat-header {
     font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
     padding: 8px 0 4px; font-weight: 600;
@@ -278,6 +285,15 @@ function renderPart(r) {
   html += socksHtml(r);
 
   if (r.soil_summary) html += `<div class="soil-box">🌱 ${r.soil_summary}</div>`;
+
+  // Checkpointy
+  if (r.checkpoints && r.checkpoints.length) {
+    html += `<div class="summary-box"><h2>📸 Punkty kontrolne</h2>`;
+    for (const cp of r.checkpoints) {
+      html += `<div class="checkpoint">📸 <strong>#${cp.id} ${cp.name}</strong> — km ${cp.km_on_trail} <span style="color:var(--muted)">(${cp.dist_km} km od szlaku)</span></div>`;
+    }
+    html += `</div>`;
+  }
 
   html += tableHtml(r.rows || []);
 

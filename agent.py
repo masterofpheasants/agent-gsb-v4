@@ -407,6 +407,13 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
         for p in seg[::dense_step]
     ]
 
+    # Punkty kontrolne GSB na trasie
+    try:
+        from checkpoints import find_checkpoints_on_route
+        checkpoints = find_checkpoints_on_route(trail_pts)
+    except Exception:
+        checkpoints = []
+
     return {
         "date": trip_date.isoformat(),
         "start_name": start_name,
@@ -419,6 +426,7 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
         "soil_summary": soil["summary"],
         "rows": rows,
         "trail_pts": trail_pts,
+        "checkpoints": checkpoints,
         "summary": summary,
         "recommendation": "",
         "recommendation_reason": "",
