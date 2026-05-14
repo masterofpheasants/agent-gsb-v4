@@ -260,18 +260,6 @@ async def cmd_set_llm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await update.message.reply_text(f"✅ LLM ustawiony na: {labels[args[0]]}")
 
-async def cmd_obiekty(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    uid = _last_uid_cache.get(user_id)
-    if not uid:
-        await update.message.reply_text(
-            "Brak ostatniej trasy. Wyślij najpierw zapytanie o trasę."
-        )
-        return
-    await update.message.reply_text(
-        "Wybierz kategorie obiektów:",
-        reply_markup=_poi_keyboard(user_id, uid)
-    )
 
 async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -534,8 +522,9 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.warning(f"POI generate — trail_pts: {len(trail_pts)}, uid: {uid}, cats: {selected}")
 
         if not trail_pts:
-            await query.message.reply_text(
-                "Nie można pobrać danych trasy. Spróbuj wygenerować trasę ponownie."
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="Nie można pobrać danych trasy. Spróbuj wygenerować trasę ponownie."
             )
             return
 
@@ -545,22 +534,24 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             pois = fetch_pois(trail_pts, list(selected))
         except Exception as e:
             logging.exception("POI fetch error")
-            await query.message.reply_text(f"Błąd pobierania obiektów: {e}")
+            await context.bot.send_message(chat_id=user_id, text=f"Błąd pobierania obiektów: {e}")
             return
 
         logging.warning(f"POI found: {len(pois)}")
 
         if not pois:
-            await query.message.reply_text(
-                "Nie znaleziono obiektów w pobliżu trasy (300m–1km)."
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="Nie znaleziono obiektów w pobliżu trasy."
             )
             return
 
         store_pois(uid, pois)
 
         poi_url = f"{WEBAPP_URL}/?uid={uid}&tab=pois"
-        await query.message.reply_text(
-            f"Znaleziono {len(pois)} obiektów 📍",
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"Znaleziono {len(pois)} obiektów 📍",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton(
                     "🗺️ Pokaż obiekty", web_app=WebAppInfo(url=poi_url)
@@ -582,6 +573,20 @@ def _split(text: str, limit: int = 3800) -> list[str]:
     if current:
         chunks.append("\n".join(current))
     return chunks
+
+
+async def cmd_obiekty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    uid = _last_uid_cache.get(user_id)
+    if not uid:
+        await update.message.reply_text(
+            "Brak ostatniej trasy. Wyślij najpierw zapytanie o trasę."
+        )
+        return
+    await update.message.reply_text(
+        "Wybierz kategorie obiektów:",
+        reply_markup=_poi_keyboard(user_id, uid)
+    )
 
 
 # ---------- Main ----------
