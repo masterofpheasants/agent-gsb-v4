@@ -532,6 +532,7 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 InlineKeyboardButton("🗺️ Pokaż obiekty", web_app=WebAppInfo(url=poi_url))
             ]])
         )
+        logging.warning(f"trail_pts count2: {len(trail_pts)}, sample2: {trail_pts[:2] if trail_pts else 'EMPTY'}")
 
 
 def _split(text: str, limit: int = 3800) -> list[str]:
