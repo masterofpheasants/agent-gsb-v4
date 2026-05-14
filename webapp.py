@@ -165,6 +165,7 @@ HTML = """<!DOCTYPE html>
   .poi-meta { color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
   .poi-proximity-trail { color: var(--green); font-size: 11px; font-weight: 600; }
   .poi-proximity-near { color: var(--yellow); font-size: 11px; }
+  .poi-proximity-faraway { color: var(--red); font-size: 11px; }
   .poi-extra { margin-top: 6px; font-size: 11px; color: var(--muted); }
   .checkpoint {
     background: rgba(91,155,213,0.1); border: 1px solid rgba(91,155,213,0.4);
@@ -402,7 +403,9 @@ function showPois() {
   for (const [cat, items] of Object.entries(byCat)) {
     html += `<div class="poi-cat-header">${cat}</div>`;
     for (const p of items) {
-      const proxClass = p.proximity === 'na szlaku' ? 'poi-proximity-trail' : 'poi-proximity-near';
+      const proxClass = p.dist_m <= 300 ? 'poi-proximity-trail' : 
+                  p.dist_m <= 1000 ? 'poi-proximity-near' : 
+                  'poi-proximity-faraway';
       html += `<div class="poi-item">
         <div class="poi-header">
           <span class="poi-icon">${p.icon}</span>
