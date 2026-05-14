@@ -11,7 +11,7 @@ import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter"
 
 DIST_ON_TRAIL_M = 300
 DIST_NEARBY_M = 10000  # testowo 10 km
