@@ -14,7 +14,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter"
 
 DIST_ON_TRAIL_M = 300
-DIST_NEARBY_M = 10000  # testowo 10 km
+DIST_NEARBY_M = 1000
+DIST_FARAWAY = 5000
 
 # ============================================================
 # KATEGORIE
@@ -296,11 +297,17 @@ def fetch_pois(trail_pts: list, categories: list[str]) -> list[dict]:
             tags = el.get("tags", {})
             dist_m, km_on_trail = _nearest_on_trail(trail_pts, lat, lon)
 
-            if dist_m > DIST_NEARBY_M:
+            if dist_m > DIST_FARAWAY:
                 continue
 
             name = tags.get("name") or tags.get("name:pl") or ""
-            proximity = "na szlaku" if dist_m <= DIST_ON_TRAIL_M else "w pobliżu"
+
+            if dist_m <= DIST_ON_TRAIL_M:
+                proximity = "na szlaku"
+            elif dist_m <= DIST_NEARBY_M:
+                proximity = "w pobliżu"
+            else: proximity = "odległe"
+
             icon = _get_icon(tags)
             cat_label = CATEGORIES.get(cat_id, {}).get("label", "📌 Inne")
 
