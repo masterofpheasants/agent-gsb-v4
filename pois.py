@@ -4,6 +4,7 @@ Zapytania wysyłane per kategoria (unika 406).
 """
 from __future__ import annotations
 
+import logging
 import math
 import time
 import requests
@@ -13,7 +14,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 DIST_ON_TRAIL_M = 300
-DIST_NEARBY_M = 1000
+DIST_NEARBY_M = 10000  # testowo 10 km
 
 # ============================================================
 # KATEGORIE
@@ -225,9 +226,13 @@ def _fetch_category(bbox: str, cat_id: str) -> list[dict]:
             verify=False,
         )
         if resp.status_code != 200:
+            logging.warning(f"Overpass {cat_id}: status {resp.status_code}")
             return []
-        return resp.json().get("elements", [])
-    except Exception:
+        elements = resp.json().get("elements", [])
+        logging.warning(f"Overpass {cat_id}: {len(elements)} elements")
+        return elements
+    except Exception as e:
+        logging.warning(f"Overpass {cat_id} error: {e}")
         return []
 
 
@@ -321,6 +326,7 @@ def fetch_pois(trail_pts: list, categories: list[str]) -> list[dict]:
                 "extra": extra,
             })
 
+    logging.warning(f"POI bbox: {bbox}, seen: {len(seen)}, kept: {len(pois)}")
     pois.sort(key=lambda x: (x["km"], x["dist_m"]))
     return enrich_with_next_distance(pois)
 
