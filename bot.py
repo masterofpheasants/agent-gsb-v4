@@ -31,6 +31,7 @@ _pending: dict[int, dict] = {}
 _llm_cache: dict[int, str] = {}
 _poi_cats_cache: dict[int, set[str]] = {}
 _last_uid_cache: dict[int, str] = {}
+_uid_map: dict[str, str] = {}  # uid_short → uid_full
 
 ALL_POI_CATS = {
     "noclegi": "🏨 Noclegi",
@@ -175,6 +176,11 @@ def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
 
 def _poi_keyboard(user_id: int, uid: str) -> InlineKeyboardMarkup:
     selected = _poi_cats_cache.get(user_id, set())
+    # Skróć uid do hash żeby zmieścić się w 64 znakach
+    import hashlib
+    uid_short = hashlib.md5(uid.encode()).hexdigest()[:8]
+    # Zapisz mapowanie
+    _uid_map[uid_short] = uid
     rows = []
     cats = list(ALL_POI_CATS.items())
     for i in range(0, len(cats), 2):
@@ -183,11 +189,11 @@ def _poi_keyboard(user_id: int, uid: str) -> InlineKeyboardMarkup:
             checked = "✅" if cat_id in selected else "☑️"
             row.append(InlineKeyboardButton(
                 f"{checked} {label}",
-                callback_data=f"poi_toggle:{cat_id}:{uid}"
+                callback_data=f"poi_toggle:{cat_id}:{uid_short}"
             ))
         rows.append(row)
     rows.append([
-        InlineKeyboardButton("🗺️ Generuj obiekty", callback_data=f"poi_generate:{uid}"),
+        InlineKeyboardButton("🗺️ Generuj obiekty", callback_data=f"poi_generate:{uid_short}"),
         InlineKeyboardButton("❌ Pomiń", callback_data="poi_skip"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -226,7 +232,7 @@ Mozesz tez wyslac lokalizacje GPS i napisac ile km.
 /connect_strava [dni] - polacz konto Strava (domyslnie 30 dni)
 /strava - pokaz swoj profil Strava
 /set_llm groq|claude|off - wybierz model LLM
-/obiekty - pokaż obiekty dla ostatniej trasy
+/obiekty - pokaz obiekty dla ostatniej trasy
 /help - ta wiadomosc
 """
 
@@ -450,6 +456,8 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     user_id = query.from_user.id
     data = query.data
+    uid_short = data.split(":", 1)[1]  # lub split(":", 2)[2]
+    uid = _uid_map.get(uid_short, uid_short)
 
     # Toggle kategorii
     if data.startswith("poi_toggle:"):
