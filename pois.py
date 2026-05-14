@@ -1,195 +1,179 @@
 """
 pois.py - Pobieranie obiektów POI z OpenStreetMap (Overpass API)
-Kategorie: noclegi, jedzenie, zakupy, woda, bezpieczeństwo, higiena, transport, odpoczynek
+Zapytania wysyłane per kategoria (unika 406).
 """
 from __future__ import annotations
 
 import math
+import time
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
-# Dystanse
-DIST_ON_TRAIL_M = 300   # "na szlaku"
-DIST_NEARBY_M = 1000    # "w pobliżu"
+DIST_ON_TRAIL_M = 300
+DIST_NEARBY_M = 1000
 
 # ============================================================
-# DEFINICJE KATEGORII
+# KATEGORIE
 # ============================================================
 
 CATEGORIES = {
     "noclegi": {
         "label": "🏨 Noclegi",
-        "tags": [
-            ("tourism", "hotel"),
-            ("tourism", "guest_house"),
-            ("tourism", "hostel"),
-            ("tourism", "apartment"),
-            ("tourism", "camp_site"),
-            ("tourism", "alpine_hut"),
-            ("tourism", "wilderness_hut"),
-            ("amenity", "shelter"),
-            ("shelter_type", "*"),
+        "queries": [
+            'node["tourism"="hotel"]({bbox});',
+            'node["tourism"="guest_house"]({bbox});',
+            'node["tourism"="hostel"]({bbox});',
+            'node["tourism"="apartment"]({bbox});',
+            'node["tourism"="camp_site"]({bbox});',
+            'node["tourism"="alpine_hut"]({bbox});',
+            'node["tourism"="wilderness_hut"]({bbox});',
+            'way["tourism"="alpine_hut"]({bbox});',
+            'way["tourism"="wilderness_hut"]({bbox});',
+            'way["building:use"="civic"]["tourism"]({bbox});',
         ],
     },
     "jedzenie": {
         "label": "🍽️ Jedzenie",
-        "tags": [
-            ("amenity", "restaurant"),
-            ("amenity", "cafe"),
-            ("amenity", "bar"),
-            ("amenity", "pub"),
-            ("amenity", "fast_food"),
-            ("amenity", "biergarten"),
-            ("amenity", "food_court"),
+        "queries": [
+            'node["amenity"="restaurant"]({bbox});',
+            'node["amenity"="cafe"]({bbox});',
+            'node["amenity"="bar"]({bbox});',
+            'node["amenity"="pub"]({bbox});',
+            'node["amenity"="fast_food"]({bbox});',
+            'node["amenity"="biergarten"]({bbox});',
+            'way["amenity"="restaurant"]({bbox});',
+            'way["amenity"="cafe"]({bbox});',
+            'way["amenity"="bar"]({bbox});',
         ],
     },
     "zakupy": {
         "label": "🛒 Zakupy",
-        "tags": [
-            ("shop", "*"),
-            ("amenity", "atm"),
-            ("amenity", "bank"),
-            ("amenity", "vending_machine"),
-            ("amenity", "marketplace"),
+        "queries": [
+            'node["shop"="supermarket"]({bbox});',
+            'node["shop"="convenience"]({bbox});',
+            'node["shop"="general"]({bbox});',
+            'node["shop"="greengrocer"]({bbox});',
+            'node["shop"="outdoor"]({bbox});',
+            'node["amenity"="atm"]({bbox});',
+            'node["amenity"="bank"]({bbox});',
+            'node["amenity"="vending_machine"]({bbox});',
         ],
     },
     "woda": {
         "label": "💧 Woda",
-        "tags": [
-            ("natural", "spring"),
-            ("amenity", "drinking_water"),
-            ("man_made", "water_well"),
-            ("amenity", "water_point"),
-            ("emergency", "drinking_water"),
+        "queries": [
+            'node["natural"="spring"]({bbox});',
+            'node["amenity"="drinking_water"]({bbox});',
+            'node["man_made"="water_well"]({bbox});',
+            'node["amenity"="water_point"]({bbox});',
+            'node["emergency"="drinking_water"]({bbox});',
         ],
     },
     "bezpieczenstwo": {
         "label": "🆘 Bezpieczeństwo",
-        "tags": [
-            ("emergency", "mountain_rescue"),
-            ("emergency", "assembly_point"),
-            ("emergency", "first_aid_kit"),
-            ("emergency", "rescue_box"),
-            ("amenity", "police"),
-            ("amenity", "ranger_station"),
+        "queries": [
+            'node["emergency"="mountain_rescue"]({bbox});',
+            'node["emergency"="assembly_point"]({bbox});',
+            'node["emergency"="first_aid_kit"]({bbox});',
+            'node["emergency"="rescue_box"]({bbox});',
+            'node["amenity"="police"]({bbox});',
+            'node["amenity"="ranger_station"]({bbox});',
         ],
     },
     "higiena": {
         "label": "🚻 Higiena/zdrowie",
-        "tags": [
-            ("amenity", "toilets"),
-            ("amenity", "pharmacy"),
-            ("amenity", "hospital"),
-            ("amenity", "clinic"),
-            ("amenity", "doctors"),
-            ("building", "toilets"),
+        "queries": [
+            'node["amenity"="toilets"]({bbox});',
+            'node["amenity"="pharmacy"]({bbox});',
+            'node["amenity"="hospital"]({bbox});',
+            'node["amenity"="clinic"]({bbox});',
+            'node["building"="toilets"]({bbox});',
         ],
     },
     "transport": {
         "label": "🚌 Transport",
-        "tags": [
-            ("highway", "bus_stop"),
-            ("amenity", "bus_station"),
-            ("public_transport", "stop_position"),
-            ("amenity", "fuel"),
+        "queries": [
+            'node["highway"="bus_stop"]({bbox});',
+            'node["amenity"="bus_station"]({bbox});',
+            'node["amenity"="fuel"]({bbox});',
         ],
     },
     "odpoczynek": {
         "label": "🪑 Odpoczynek",
-        "tags": [
-            ("leisure", "picnic_table"),
-            ("amenity", "bench"),
-            ("amenity", "shelter"),
-            ("amenity", "bbq"),
-            ("leisure", "nature_reserve"),
-            ("tourism", "viewpoint"),
-            ("tourism", "picnic_site"),
+        "queries": [
+            'node["leisure"="picnic_table"]({bbox});',
+            'node["amenity"="bench"]({bbox});',
+            'node["amenity"="shelter"]({bbox});',
+            'node["amenity"="bbq"]({bbox});',
+            'node["tourism"="viewpoint"]({bbox});',
+            'node["tourism"="picnic_site"]({bbox});',
         ],
     },
 }
 
-# Ikony per tag
 TAG_ICONS = {
-    ("tourism", "hotel"): "🏨",
-    ("tourism", "guest_house"): "🏡",
-    ("tourism", "hostel"): "🛏️",
-    ("tourism", "apartment"): "🏠",
-    ("tourism", "camp_site"): "⛺",
-    ("tourism", "alpine_hut"): "🏔️",
-    ("tourism", "wilderness_hut"): "🛖",
-    ("amenity", "shelter"): "🏚️",
-    ("amenity", "restaurant"): "🍽️",
-    ("amenity", "cafe"): "☕",
-    ("amenity", "bar"): "🍺",
-    ("amenity", "pub"): "🍻",
-    ("amenity", "fast_food"): "🍔",
-    ("shop", "*"): "🛒",
-    ("amenity", "atm"): "💳",
-    ("amenity", "bank"): "🏦",
-    ("amenity", "vending_machine"): "🎰",
-    ("natural", "spring"): "💧",
-    ("amenity", "drinking_water"): "🚰",
-    ("man_made", "water_well"): "🪣",
-    ("emergency", "mountain_rescue"): "🆘",
-    ("emergency", "first_aid_kit"): "🩹",
-    ("emergency", "rescue_box"): "📦",
-    ("amenity", "police"): "👮",
-    ("amenity", "toilets"): "🚻",
-    ("amenity", "pharmacy"): "💊",
-    ("amenity", "hospital"): "🏥",
-    ("highway", "bus_stop"): "🚌",
-    ("amenity", "fuel"): "⛽",
-    ("leisure", "picnic_table"): "🪑",
-    ("amenity", "bench"): "🪑",
-    ("amenity", "bbq"): "🔥",
-    ("tourism", "viewpoint"): "👁️",
-    ("tourism", "picnic_site"): "🧺",
-    ("amenity", "ranger_station"): "🌲",
+    "tourism=hotel": "🏨",
+    "tourism=guest_house": "🏡",
+    "tourism=hostel": "🛏️",
+    "tourism=apartment": "🏠",
+    "tourism=camp_site": "⛺",
+    "tourism=alpine_hut": "🏔️",
+    "tourism=wilderness_hut": "🛖",
+    "amenity=shelter": "🏚️",
+    "amenity=restaurant": "🍽️",
+    "amenity=cafe": "☕",
+    "amenity=bar": "🍺",
+    "amenity=pub": "🍻",
+    "amenity=fast_food": "🍔",
+    "amenity=biergarten": "🍻",
+    "shop=supermarket": "🛒",
+    "shop=convenience": "🛒",
+    "shop=general": "🛒",
+    "shop=greengrocer": "🥬",
+    "shop=outdoor": "🎒",
+    "amenity=atm": "💳",
+    "amenity=bank": "🏦",
+    "amenity=vending_machine": "🎰",
+    "natural=spring": "💧",
+    "amenity=drinking_water": "🚰",
+    "man_made=water_well": "🪣",
+    "amenity=water_point": "🚰",
+    "emergency=mountain_rescue": "🆘",
+    "emergency=first_aid_kit": "🩹",
+    "emergency=rescue_box": "📦",
+    "emergency=assembly_point": "🔴",
+    "amenity=police": "👮",
+    "amenity=ranger_station": "🌲",
+    "amenity=toilets": "🚻",
+    "building=toilets": "🚻",
+    "amenity=pharmacy": "💊",
+    "amenity=hospital": "🏥",
+    "amenity=clinic": "🏥",
+    "highway=bus_stop": "🚌",
+    "amenity=bus_station": "🚌",
+    "amenity=fuel": "⛽",
+    "leisure=picnic_table": "🪑",
+    "amenity=bench": "🪑",
+    "amenity=bbq": "🔥",
+    "tourism=viewpoint": "👁️",
+    "tourism=picnic_site": "🧺",
 }
 
 
-# ============================================================
-# OVERPASS QUERY
-# ============================================================
-
-def _build_query(bbox: str, categories: list[str]) -> str:
-    selected_tags = []
-    for cat in categories:
-        if cat in CATEGORIES:
-            for key, value in CATEGORIES[cat]["tags"]:
-                if value == "*":
-                    selected_tags.append(f'node["{key}"]({bbox});')
-                    selected_tags.append(f'way["{key}"]({bbox});')
-                else:
-                    selected_tags.append(f'node["{key}"="{value}"]({bbox});')
-                    selected_tags.append(f'way["{key}"="{value}"]({bbox});')
-
-    tags_str = "\n  ".join(selected_tags)
-    return f"""
-[out:json][timeout:20];
-(
-  {tags_str}
-);
-out center;
-"""
-
-
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+def _haversine_m(lat1, lon1, lat2, lon2) -> float:
     R = 6371000.0
     la1, la2 = math.radians(lat1), math.radians(lat2)
     dla = math.radians(lat2 - lat1)
     dlo = math.radians(lon2 - lon1)
-    h = math.sin(dla / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin(dlo / 2) ** 2
+    h = math.sin(dla/2)**2 + math.cos(la1)*math.cos(la2)*math.sin(dlo/2)**2
     return 2 * R * math.asin(math.sqrt(h))
 
 
-def _nearest_point_on_trail(trail_pts: list, lat: float, lon: float) -> tuple[float, float]:
-    """Zwraca (dist_m, km_on_trail) do najbliższego punktu na szlaku."""
-    best_dist = float("inf")
-    best_km = 0.0
+def _nearest_on_trail(trail_pts, lat, lon) -> tuple[float, float]:
+    best_dist, best_km = float("inf"), 0.0
     for p in trail_pts:
         d = _haversine_m(p["lat"], p["lon"], lat, lon)
         if d < best_dist:
@@ -199,130 +183,149 @@ def _nearest_point_on_trail(trail_pts: list, lat: float, lon: float) -> tuple[fl
 
 
 def _get_icon(tags: dict) -> str:
-    for (key, value), icon in TAG_ICONS.items():
-        if value == "*":
-            if key in tags:
-                return icon
-        else:
-            if tags.get(key) == value:
+    for key in ("tourism", "amenity", "shop", "natural", "man_made",
+                "emergency", "highway", "leisure", "building"):
+        val = tags.get(key)
+        if val:
+            icon = TAG_ICONS.get(f"{key}={val}")
+            if icon:
                 return icon
     return "📌"
 
 
-def _get_category(tags: dict) -> str:
+def _get_category_for_tags(tags: dict) -> tuple[str, str]:
+    """Zwraca (category_id, category_label)."""
     for cat_id, cat_data in CATEGORIES.items():
-        for key, value in cat_data["tags"]:
-            if value == "*":
-                if key in tags:
-                    return cat_id
-            else:
-                if tags.get(key) == value:
-                    return cat_id
-    return "inne"
+        for q in cat_data["queries"]:
+            # Wyciągnij key=value z query string
+            import re
+            m = re.search(r'"([^"]+)"="([^"]+)"', q)
+            if m:
+                key, val = m.group(1), m.group(2)
+                if tags.get(key) == val:
+                    return cat_id, cat_data["label"]
+    return "inne", "📌 Inne"
 
 
-# ============================================================
-# GŁÓWNA FUNKCJA
-# ============================================================
+def _fetch_category(bbox: str, cat_id: str) -> list[dict]:
+    """Pobiera POI dla jednej kategorii."""
+    cat_data = CATEGORIES.get(cat_id, {})
+    queries = cat_data.get("queries", [])
+    if not queries:
+        return []
+
+    lines = "\n  ".join(q.replace("{bbox}", bbox) for q in queries)
+    query = f"[out:json][timeout:20];\n(\n  {lines}\n);\nout center;"
+
+    try:
+        resp = requests.post(
+            OVERPASS_URL,
+            data={"data": query},
+            timeout=25,
+            verify=False,
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json().get("elements", [])
+    except Exception:
+        return []
+
+
+def enrich_with_next_distance(pois: list[dict]) -> list[dict]:
+    """Dla sklepów i jedzenia dodaje info o odległości do następnego obiektu."""
+    target_cats = {"jedzenie", "zakupy"}
+    relevant = [p for p in pois if p.get("category") in target_cats]
+
+    for i, poi in enumerate(relevant):
+        next_same = next(
+            (p for p in relevant[i+1:] if p["category"] == poi["category"]),
+            None
+        )
+        if next_same:
+            diff_km = round(next_same["km"] - poi["km"], 1)
+            poi["next_same_km"] = diff_km
+            poi["next_same_name"] = next_same["name"]
+        else:
+            poi["next_same_km"] = None
+            poi["next_same_name"] = None
+
+    return pois
+
 
 def fetch_pois(trail_pts: list, categories: list[str]) -> list[dict]:
     """
     Pobiera POI z Overpass dla wybranych kategorii.
-    trail_pts: lista dict {lat, lon, km} — punkty trasy
-    categories: lista kluczy z CATEGORIES
-    Zwraca listę POI posortowaną po km na szlaku.
+    Zapytania wysyłane osobno per kategoria.
     """
     if not trail_pts or not categories:
         return []
 
     lats = [p["lat"] for p in trail_pts]
     lons = [p["lon"] for p in trail_pts]
-    # Powiększ bbox o ~1 km
     margin = 0.01
-    bbox = f"{min(lats)-margin},{min(lons)-margin},{max(lats)+margin},{max(lons)+margin}"
-
-    query = _build_query(bbox, categories)
-
-    try:
-        resp = requests.post(
-            OVERPASS_URL, 
-            data={"data": query}, 
-            timeout=25, 
-            verify=False,
-            headers={"Accept": "application/json"}
-        )
-        resp.raise_for_status()
-        elements = resp.json().get("elements", [])
-    except Exception as e:
-        return [{"error": str(e)}]
+    bbox = (f"{min(lats)-margin},{min(lons)-margin},"
+            f"{max(lats)+margin},{max(lons)+margin}")
 
     pois = []
     seen = set()
 
-    for el in elements:
-        # Pobierz współrzędne (node lub way z center)
-        if el["type"] == "node":
-            lat = el.get("lat")
-            lon = el.get("lon")
-        else:
-            center = el.get("center", {})
-            lat = center.get("lat")
-            lon = center.get("lon")
+    for cat_id in categories:
+        elements = _fetch_category(bbox, cat_id)
+        time.sleep(0.5)  # grzeczność wobec Overpass
 
-        if not lat or not lon:
-            continue
+        for el in elements:
+            if el["type"] == "node":
+                lat, lon = el.get("lat"), el.get("lon")
+            else:
+                center = el.get("center", {})
+                lat, lon = center.get("lat"), center.get("lon")
 
-        tags = el.get("tags", {})
-        name = tags.get("name") or tags.get("name:pl") or ""
+            if not lat or not lon:
+                continue
 
-        # Deduplikacja po nazwie i pozycji
-        key = (round(lat, 4), round(lon, 4))
-        if key in seen:
-            continue
-        seen.add(key)
+            key = (round(lat, 4), round(lon, 4))
+            if key in seen:
+                continue
+            seen.add(key)
 
-        dist_m, km_on_trail = _nearest_point_on_trail(trail_pts, lat, lon)
+            tags = el.get("tags", {})
+            dist_m, km_on_trail = _nearest_on_trail(trail_pts, lat, lon)
 
-        if dist_m > DIST_NEARBY_M:
-            continue
+            if dist_m > DIST_NEARBY_M:
+                continue
 
-        proximity = "na szlaku" if dist_m <= DIST_ON_TRAIL_M else "w pobliżu"
-        icon = _get_icon(tags)
-        category = _get_category(tags)
+            name = tags.get("name") or tags.get("name:pl") or ""
+            proximity = "na szlaku" if dist_m <= DIST_ON_TRAIL_M else "w pobliżu"
+            icon = _get_icon(tags)
+            cat_label = CATEGORIES.get(cat_id, {}).get("label", "📌 Inne")
 
-        # Dodatkowe info
-        extra = []
-        if tags.get("opening_hours"):
-            extra.append(f"⏰ {tags['opening_hours']}")
-        if tags.get("phone") or tags.get("contact:phone"):
-            extra.append(f"📞 {tags.get('phone') or tags.get('contact:phone')}")
-        if tags.get("website") or tags.get("contact:website"):
-            extra.append(f"🌐 {tags.get('website') or tags.get('contact:website')}")
+            extra = []
+            if tags.get("opening_hours"):
+                extra.append(f"⏰ {tags['opening_hours']}")
+            if tags.get("phone") or tags.get("contact:phone"):
+                extra.append(f"📞 {tags.get('phone') or tags.get('contact:phone')}")
+            if tags.get("website") or tags.get("contact:website"):
+                url = tags.get("website") or tags.get("contact:website")
+                extra.append(f"🌐 {url}")
 
-        pois.append({
-            "name": name or _default_name(tags, category),
-            "icon": icon,
-            "category": category,
-            "category_label": CATEGORIES.get(category, {}).get("label", "📌 Inne"),
-            "lat": round(lat, 5),
-            "lon": round(lon, 5),
-            "dist_m": round(dist_m),
-            "km": round(km_on_trail, 1),
-            "proximity": proximity,
-            "extra": extra,
-            "tags": {k: v for k, v in tags.items() if k in (
-                "name", "opening_hours", "phone", "website",
-                "amenity", "tourism", "shop", "emergency", "natural",
-                "contact:phone", "contact:website"
-            )},
-        })
+            pois.append({
+                "name": name or _default_name(cat_id),
+                "icon": icon,
+                "category": cat_id,
+                "category_label": cat_label,
+                "lat": round(lat, 5),
+                "lon": round(lon, 5),
+                "dist_m": round(dist_m),
+                "km": round(km_on_trail, 1),
+                "proximity": proximity,
+                "extra": extra,
+            })
 
-    # Sortuj po km na szlaku, potem po dystansie
     pois.sort(key=lambda x: (x["km"], x["dist_m"]))
-    return pois
+    return enrich_with_next_distance(pois)
 
 
-def _default_name(tags: dict, category: str) -> str:
+def _default_name(category: str) -> str:
     defaults = {
         "noclegi": "Nocleg",
         "jedzenie": "Restauracja/bar",
@@ -337,5 +340,4 @@ def _default_name(tags: dict, category: str) -> str:
 
 
 def get_category_labels() -> dict[str, str]:
-    """Zwraca słownik {id: label} dla wszystkich kategorii."""
     return {k: v["label"] for k, v in CATEGORIES.items()}

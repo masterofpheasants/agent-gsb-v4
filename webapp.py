@@ -397,6 +397,10 @@ function showPois() {
           <span class="${proxClass}">${p.proximity} (${p.dist_m} m)</span>
         </div>
         ${p.extra && p.extra.length ? `<div class="poi-extra">${p.extra.join(' · ')}</div>` : ''}
+        ${(p.category === 'jedzenie' || p.category === 'zakupy') ?
+          `<div class="poi-extra">${p.next_same_km !== null && p.next_same_km !== undefined ?
+            `następny za <strong>${p.next_same_km} km</strong>` :
+            'ostatni w kategorii'}</div>` : ''}
       </div>`;
     }
   }
