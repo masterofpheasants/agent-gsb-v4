@@ -16,6 +16,7 @@ _lock = threading.Lock()
 # Wyniki zapisywane do pliku — przeżywają restart
 RESULTS_FILE = Path("/tmp/gsb_results.json")
 STRAVA_FILE = Path("/tmp/gsb_strava.json")
+POIS_FILE = Path("/tmp/gsb_pois.json")
 
 
 def _load_results() -> dict:
@@ -42,6 +43,20 @@ def _load_strava() -> dict:
 def _save_strava(tokens: dict):
     try:
         STRAVA_FILE.write_text(json.dumps(tokens, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _load_pois() -> dict:
+    try:
+        return json.loads(POIS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_pois(pois: dict):
+    try:
+        POIS_FILE.write_text(json.dumps(pois, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
 
@@ -130,6 +145,31 @@ HTML = """<!DOCTYPE html>
   }
   .poi { font-size: 15px; }
   .no-data { text-align: center; padding: 60px 20px; color: var(--muted); }
+
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tab-btn {
+    flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--card); color: var(--muted); font-size: 13px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tab-btn.active { background: var(--green); color: #fff; border-color: var(--green); font-weight: 600; }
+
+  .poi-item {
+    background: var(--card); border-radius: var(--radius); padding: 12px 14px;
+    margin-bottom: 8px; border: 1px solid var(--border);
+  }
+  .poi-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .poi-icon { font-size: 18px; }
+  .poi-name { font-weight: 600; font-size: 14px; flex: 1; }
+  .poi-km { color: var(--blue); font-weight: 700; font-size: 13px; }
+  .poi-meta { color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .poi-proximity-trail { color: var(--green); font-size: 11px; font-weight: 600; }
+  .poi-proximity-near { color: var(--yellow); font-size: 11px; }
+  .poi-extra { margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .poi-cat-header {
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 8px 0 4px; font-weight: 600;
+  }
 </style>
 </head>
 <body>
@@ -280,19 +320,121 @@ function render(r) {
   document.getElementById('app').innerHTML = html;
 }
 
+let _routeData = null;
+let _poisData = null;
+let _activeTab = 'weather';
+
+function renderTabs() {
+  return `<div class="tabs">
+    <button class="tab-btn ${_activeTab==='weather'?'active':''}" onclick="switchTab('weather')">🌤️ Pogoda</button>
+    <button class="tab-btn ${_activeTab==='pois'?'active':''}" onclick="switchTab('pois')">📍 Obiekty</button>
+  </div>`;
+}
+
+function switchTab(tab) {
+  _activeTab = tab;
+  if (tab === 'weather' && _routeData) {
+    showWeather(_routeData);
+  } else if (tab === 'pois') {
+    showPois();
+  }
+}
+
+function showWeather(data) {
+  _activeTab = 'weather';
+  let html = renderTabs();
+  if (data.part2) {
+    html += `<div class="soil-box" style="text-align:center;font-size:13px">📍 ${data.part_label || 'Część 1'}</div>` +
+      renderPart(data) +
+      `<div class="soil-box" style="text-align:center;font-size:13px;margin-top:12px">📍 ${data.part2.part_label || 'Część 2'}</div>` +
+      renderPart(data.part2);
+    document.getElementById('app').innerHTML = html;
+    return;
+  }
+  html += `<div class="header">
+    <h1>📍 ${data.start_name || ''}</h1>
+    <div class="meta">
+      <span>📅 ${data.date || ''}</span>
+      <span>📏 ${data.length_km} km</span>
+      <span>⛰️ +${data.ascent_m} m</span>
+      ${data.estimated_time ? `<span>⏱️ ${data.estimated_time} (do ~${data.eta_end})</span>` : ''}
+      ${data.dist_to_trail_km > 0 ? `<span>🔗 ${data.dist_to_trail_km} km od szlaku</span>` : ''}
+    </div>
+  </div>`;
+  html += renderPart(data);
+  if (data.narrative) html += `<div class="summary-box"><h2>Opis trasy</h2>${data.narrative}</div>`;
+  document.getElementById('app').innerHTML = html;
+}
+
+function showPois() {
+  _activeTab = 'pois';
+  let html = renderTabs();
+  if (!_poisData || !_poisData.length) {
+    html += `<div class="no-data">Brak danych o obiektach.<br>Wróć do bota i wybierz kategorie.</div>`;
+    document.getElementById('app').innerHTML = html;
+    return;
+  }
+
+  // Grupuj po kategorii
+  const byCat = {};
+  for (const p of _poisData) {
+    const cat = p.category_label || '📌 Inne';
+    if (!byCat[cat]) byCat[cat] = [];
+    byCat[cat].push(p);
+  }
+
+  for (const [cat, items] of Object.entries(byCat)) {
+    html += `<div class="poi-cat-header">${cat}</div>`;
+    for (const p of items) {
+      const proxClass = p.proximity === 'na szlaku' ? 'poi-proximity-trail' : 'poi-proximity-near';
+      html += `<div class="poi-item">
+        <div class="poi-header">
+          <span class="poi-icon">${p.icon}</span>
+          <span class="poi-name">${p.name}</span>
+          <span class="poi-km">${p.km} km</span>
+        </div>
+        <div class="poi-meta">
+          <span class="${proxClass}">${p.proximity} (${p.dist_m} m)</span>
+        </div>
+        ${p.extra && p.extra.length ? `<div class="poi-extra">${p.extra.join(' · ')}</div>` : ''}
+      </div>`;
+    }
+  }
+  document.getElementById('app').innerHTML = html;
+}
+
 async function loadData() {
   const params = new URLSearchParams(window.location.search);
   const uid = params.get('uid') || 'demo';
+  const tab = params.get('tab') || 'weather';
+
   try {
-    const resp = await fetch(`/api/result?uid=${encodeURIComponent(uid)}`);
-    const data = await resp.json();
-    if (!data || data.error) {
-      document.getElementById('app').innerHTML = `<div class="no-data">Brak danych. Wyślij zapytanie do bota.</div>`;
-      return;
+    const [routeResp, poisResp] = await Promise.all([
+      fetch(`/api/result?uid=${encodeURIComponent(uid)}`),
+      fetch(`/api/pois?uid=${encodeURIComponent(uid)}`),
+    ]);
+
+    if (routeResp.ok) {
+      const data = await routeResp.json();
+      if (data && !data.error) _routeData = data;
     }
-    render(data);
+    if (poisResp.ok) {
+      const pois = await poisResp.json();
+      if (Array.isArray(pois)) _poisData = pois;
+    }
   } catch(e) {
-    document.getElementById('app').innerHTML = `<div class="no-data">Błąd ładowania danych.</div>`;
+    // ignore
+  }
+
+  if (!_routeData) {
+    document.getElementById('app').innerHTML = `<div class="no-data">Brak danych. Wyślij zapytanie do bota.</div>`;
+    return;
+  }
+
+  if (tab === 'pois') {
+    showPois();
+  } else {
+    showWeather(_routeData);
   }
 }
 
@@ -432,6 +574,31 @@ def strava_profile(user_id):
         return jsonify({"error": "no profile"}), 404
     safe = {k: v for k, v in profile.items() if k not in ("access_token", "refresh_token")}
     return jsonify(safe)
+
+
+@app.route("/api/store_pois", methods=["POST"])
+def api_store_pois():
+    payload = request.get_json()
+    uid = payload.get("uid", "")
+    pois = payload.get("pois", [])
+    with _lock:
+        all_pois = _load_pois()
+        all_pois[uid] = pois
+        if len(all_pois) > 50:
+            oldest = sorted(all_pois.keys())[:-50]
+            for k in oldest:
+                del all_pois[k]
+        _save_pois(all_pois)
+    return jsonify({"ok": True, "count": len(pois)})
+
+
+@app.route("/api/pois")
+def api_pois():
+    uid = request.args.get("uid", "")
+    with _lock:
+        all_pois = _load_pois()
+        data = all_pois.get(uid, [])
+    return jsonify(data)
 
 
 def run_webapp():
