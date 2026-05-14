@@ -244,7 +244,13 @@ def fetch_pois(trail_pts: list, categories: list[str]) -> list[dict]:
     query = _build_query(bbox, categories)
 
     try:
-        resp = requests.post(OVERPASS_URL, data={"data": query}, timeout=25, verify=False)
+        resp = requests.post(
+            OVERPASS_URL, 
+            data={"data": query}, 
+            timeout=25, 
+            verify=False,
+            headers={"Accept": "application/json"}
+        )
         resp.raise_for_status()
         elements = resp.json().get("elements", [])
     except Exception as e:
