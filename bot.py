@@ -29,9 +29,7 @@ _hour_cache: dict[int, int] = {}
 _gps_cache: dict[int, tuple[float, float]] = {}
 _pending: dict[int, dict] = {}
 _llm_cache: dict[int, str] = {}
-# Cache wybranych kategorii POI per user
 _poi_cats_cache: dict[int, set[str]] = {}
-# Cache UID ostatniej trasy per user (do generowania POI)
 _last_uid_cache: dict[int, str] = {}
 
 ALL_POI_CATS = {
@@ -176,11 +174,9 @@ def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
 
 
 def _poi_keyboard(user_id: int, uid: str) -> InlineKeyboardMarkup:
-    """Keyboard z checkboxami kategorii POI."""
     selected = _poi_cats_cache.get(user_id, set())
     rows = []
     cats = list(ALL_POI_CATS.items())
-    # 2 przyciski w rzędzie
     for i in range(0, len(cats), 2):
         row = []
         for cat_id, label in cats[i:i+2]:
@@ -190,7 +186,6 @@ def _poi_keyboard(user_id: int, uid: str) -> InlineKeyboardMarkup:
                 callback_data=f"poi_toggle:{cat_id}:{uid}"
             ))
         rows.append(row)
-    # Przyciski akcji
     rows.append([
         InlineKeyboardButton("🗺️ Generuj obiekty", callback_data=f"poi_generate:{uid}"),
         InlineKeyboardButton("❌ Pomiń", callback_data="poi_skip"),
@@ -231,6 +226,7 @@ Mozesz tez wyslac lokalizacje GPS i napisac ile km.
 /connect_strava [dni] - polacz konto Strava (domyslnie 30 dni)
 /strava - pokaz swoj profil Strava
 /set_llm groq|claude|off - wybierz model LLM
+/obiekty - pokaż obiekty dla ostatniej trasy
 /help - ta wiadomosc
 """
 
@@ -264,6 +260,18 @@ async def cmd_set_llm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await update.message.reply_text(f"✅ LLM ustawiony na: {labels[args[0]]}")
 
+async def cmd_obiekty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    uid = _last_uid_cache.get(user_id)
+    if not uid:
+        await update.message.reply_text(
+            "Brak ostatniej trasy. Wyślij najpierw zapytanie o trasę."
+        )
+        return
+    await update.message.reply_text(
+        "Wybierz kategorie obiektów:",
+        reply_markup=_poi_keyboard(user_id, uid)
+    )
 
 async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -327,28 +335,23 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def _send_result(update, text: str, raw: dict | None, uid: str, user_id: int,
-                       reply_fn=None):
-    """Wysyła wynik i pyta o POI."""
+async def _send_result(update, text: str, raw: dict | None, uid: str, user_id: int):
     if raw:
         store_result(uid, raw)
 
     keyboard = _webapp_button(uid)
-    reply = reply_fn or update.message.reply_text
-
     if keyboard:
-        await reply(
+        await update.message.reply_text(
             f"```\n{text.strip()}\n```\nSzczegóły w tabeli 👇",
             parse_mode="Markdown",
             reply_markup=keyboard
         )
     else:
         for chunk in _split(text):
-            await reply(f"```\n{chunk}\n```", parse_mode="Markdown")
+            await update.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
 
-    # Zapytaj o POI
     _last_uid_cache[user_id] = uid
-    await (reply_fn or update.message.reply_text)(
+    await update.message.reply_text(
         "Czy chcesz zobaczyć obiekty na trasie i w pobliżu?",
         reply_markup=_poi_keyboard(user_id, uid)
     )
@@ -447,7 +450,6 @@ async def handle_date_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         for chunk in _split(result_text):
             await query.message.reply_text(f"```\n{chunk}\n```", parse_mode="Markdown")
 
-    # Zapytaj o POI
     _last_uid_cache[user_id] = uid
     await query.message.reply_text(
         "Czy chcesz zobaczyć obiekty na trasie i w pobliżu?",
@@ -463,16 +465,21 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Toggle kategorii
     if data.startswith("poi_toggle:"):
-        _, cat_id, uid = data.split(":", 2)
+        parts = data.split(":", 2)
+        cat_id = parts[1]
+        uid = parts[2]
         selected = _poi_cats_cache.get(user_id, set())
         if cat_id in selected:
             selected.discard(cat_id)
         else:
             selected.add(cat_id)
         _poi_cats_cache[user_id] = selected
-        await query.edit_message_reply_markup(
-            reply_markup=_poi_keyboard(user_id, uid)
-        )
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=_poi_keyboard(user_id, uid)
+            )
+        except Exception:
+            pass
         return
 
     # Pomiń
@@ -484,51 +491,80 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data.startswith("poi_generate:"):
         uid = data.split(":", 1)[1]
         selected = _poi_cats_cache.get(user_id, set())
+
         if not selected:
-            await query.edit_message_text(
-                "Zaznacz co najmniej jedną kategorię.",
-                reply_markup=_poi_keyboard(user_id, uid)
-            )
+            try:
+                await query.edit_message_text(
+                    "Zaznacz co najmniej jedną kategorię.",
+                    reply_markup=_poi_keyboard(user_id, uid)
+                )
+            except Exception:
+                pass
             return
 
-        await query.edit_message_text(
-            f"Szukam obiektów ({', '.join(ALL_POI_CATS[c] for c in selected if c in ALL_POI_CATS)})... ⏳"
-        )
+        cat_labels = ", ".join(ALL_POI_CATS[c] for c in selected if c in ALL_POI_CATS)
+        await query.edit_message_text(f"Szukam obiektów ({cat_labels})... ⏳")
 
-        # Pobierz dane trasy z webapp
+        # Pobierz gęste punkty trasy
         trail_pts = []
         try:
-            resp = http_requests.get(f"{WEBAPP_URL}/api/result?uid={uid}", timeout=5)
+            resp = http_requests.get(
+                f"{WEBAPP_URL}/api/result?uid={uid}", timeout=5
+            )
             if resp.status_code == 200:
                 route_data = resp.json()
-                rows = route_data.get("rows", [])
-                if route_data.get("part2"):
-                    rows += route_data["part2"].get("rows", [])
-                trail_pts = [{"lat": r["lat"], "lon": r["lon"], "km": r["km"]} for r in rows]
+                # Użyj gęstych punktów GPX jeśli dostępne
+                trail_pts = route_data.get("trail_pts", [])
+                if not trail_pts:
+                    # Fallback do rows
+                    rows = route_data.get("rows", [])
+                    if route_data.get("part2"):
+                        rows += route_data["part2"].get("rows", [])
+                    trail_pts = [
+                        {"lat": r["lat"], "lon": r["lon"], "km": r["km"]}
+                        for r in rows
+                        if "lat" in r and "lon" in r and "km" in r
+                    ]
+                # Dla tras podzielonych — połącz trail_pts z obu części
+                if route_data.get("part2") and route_data["part2"].get("trail_pts"):
+                    trail_pts += route_data["part2"]["trail_pts"]
         except Exception as e:
             logging.warning(f"Nie mozna pobrac trasy: {e}")
 
+        logging.warning(f"POI generate — trail_pts: {len(trail_pts)}, uid: {uid}, cats: {selected}")
+
         if not trail_pts:
-            await query.message.reply_text("Nie można pobrać danych trasy. Spróbuj ponownie.")
+            await query.message.reply_text(
+                "Nie można pobrać danych trasy. Spróbuj wygenerować trasę ponownie."
+            )
             return
 
         # Pobierz POI
-        from pois import fetch_pois
-        pois = fetch_pois(trail_pts, list(selected))
-
-        if not pois:
-            await query.message.reply_text("Nie znaleziono obiektów w pobliżu trasy.")
+        try:
+            from pois import fetch_pois
+            pois = fetch_pois(trail_pts, list(selected))
+        except Exception as e:
+            logging.exception("POI fetch error")
+            await query.message.reply_text(f"Błąd pobierania obiektów: {e}")
             return
 
-        # Zapisz POI do webapp
+        logging.warning(f"POI found: {len(pois)}")
+
+        if not pois:
+            await query.message.reply_text(
+                "Nie znaleziono obiektów w pobliżu trasy (300m–1km)."
+            )
+            return
+
         store_pois(uid, pois)
 
-        # Wyślij przycisk do webapp z zakładką POI
         poi_url = f"{WEBAPP_URL}/?uid={uid}&tab=pois"
         await query.message.reply_text(
             f"Znaleziono {len(pois)} obiektów 📍",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🗺️ Pokaż obiekty", web_app=WebAppInfo(url=poi_url))
+                InlineKeyboardButton(
+                    "🗺️ Pokaż obiekty", web_app=WebAppInfo(url=poi_url)
+                )
             ]])
         )
 
@@ -565,6 +601,7 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("set_llm", cmd_set_llm))
+    app.add_handler(CommandHandler("obiekty", cmd_obiekty))
     app.add_handler(CommandHandler("connect_strava", cmd_connect_strava))
     app.add_handler(CommandHandler("strava", cmd_strava))
     app.add_handler(CallbackQueryHandler(handle_date_callback, pattern="^date:"))

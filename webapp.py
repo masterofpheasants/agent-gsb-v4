@@ -165,7 +165,15 @@ HTML = """<!DOCTYPE html>
   .poi-meta { color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
   .poi-proximity-trail { color: var(--green); font-size: 11px; font-weight: 600; }
   .poi-proximity-near { color: var(--yellow); font-size: 11px; }
+  .poi-proximity-faraway { color: var(--red); font-size: 11px; }
   .poi-extra { margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .checkpoint {
+    background: rgba(91,155,213,0.1); border: 1px solid rgba(91,155,213,0.4);
+    border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px;
+    font-size: 12px; color: var(--blue);
+  }
+  .checkpoint strong { font-size: 13px; }
+
   .poi-cat-header {
     font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
     padding: 8px 0 4px; font-weight: 600;
@@ -279,6 +287,15 @@ function renderPart(r) {
 
   if (r.soil_summary) html += `<div class="soil-box">🌱 ${r.soil_summary}</div>`;
 
+  // Checkpointy
+  if (r.checkpoints && r.checkpoints.length) {
+    html += `<div class="summary-box"><h2>📸 Punkty kontrolne</h2>`;
+    for (const cp of r.checkpoints) {
+      html += `<div class="checkpoint">📸 <strong>#${cp.id} ${cp.name}</strong> — km ${cp.km_on_trail} <span style="color:var(--muted)">(${cp.dist_km} km od szlaku)</span></div>`;
+    }
+    html += `</div>`;
+  }
+
   html += tableHtml(r.rows || []);
 
   if (r.summary) html += `<div class="summary-box"><h2>Podsumowanie</h2>${r.summary}</div>`;
@@ -386,7 +403,9 @@ function showPois() {
   for (const [cat, items] of Object.entries(byCat)) {
     html += `<div class="poi-cat-header">${cat}</div>`;
     for (const p of items) {
-      const proxClass = p.proximity === 'na szlaku' ? 'poi-proximity-trail' : 'poi-proximity-near';
+      const proxClass = p.dist_m <= 300 ? 'poi-proximity-trail' : 
+                  p.dist_m <= 1000 ? 'poi-proximity-near' : 
+                  'poi-proximity-faraway';
       html += `<div class="poi-item">
         <div class="poi-header">
           <span class="poi-icon">${p.icon}</span>
@@ -397,6 +416,10 @@ function showPois() {
           <span class="${proxClass}">${p.proximity} (${p.dist_m} m)</span>
         </div>
         ${p.extra && p.extra.length ? `<div class="poi-extra">${p.extra.join(' · ')}</div>` : ''}
+        ${(p.category === 'jedzenie' || p.category === 'zakupy') ?
+          `<div class="poi-extra">${p.next_same_km !== null && p.next_same_km !== undefined ?
+            `następny za <strong>${p.next_same_km} km</strong>` :
+            'ostatni w kategorii'}</div>` : ''}
       </div>`;
     }
   }
