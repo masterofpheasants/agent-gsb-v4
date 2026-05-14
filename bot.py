@@ -226,6 +226,7 @@ Mozesz tez wyslac lokalizacje GPS i napisac ile km.
 /connect_strava [dni] - polacz konto Strava (domyslnie 30 dni)
 /strava - pokaz swoj profil Strava
 /set_llm groq|claude|off - wybierz model LLM
+/obiekty - pokaż obiekty dla ostatniej trasy
 /help - ta wiadomosc
 """
 
@@ -259,6 +260,18 @@ async def cmd_set_llm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     await update.message.reply_text(f"✅ LLM ustawiony na: {labels[args[0]]}")
 
+async def cmd_obiekty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    uid = _last_uid_cache.get(user_id)
+    if not uid:
+        await update.message.reply_text(
+            "Brak ostatniej trasy. Wyślij najpierw zapytanie o trasę."
+        )
+        return
+    await update.message.reply_text(
+        "Wybierz kategorie obiektów:",
+        reply_markup=_poi_keyboard(user_id, uid)
+    )
 
 async def cmd_connect_strava(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -588,6 +601,7 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("set_llm", cmd_set_llm))
+    app.add_handler(CommandHandler("obiekty", cmd_obiekty))
     app.add_handler(CommandHandler("connect_strava", cmd_connect_strava))
     app.add_handler(CommandHandler("strava", cmd_strava))
     app.add_handler(CallbackQueryHandler(handle_date_callback, pattern="^date:"))
