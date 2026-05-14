@@ -403,8 +403,8 @@ function showPois() {
   for (const [cat, items] of Object.entries(byCat)) {
     html += `<div class="poi-cat-header">${cat}</div>`;
     for (const p of items) {
-      const proxClass = p.dist_m <= 300 ? 'poi-proximity-trail' : 
-                  p.dist_m <= 3000 ? 'poi-proximity-near' : 
+const proxClass = p.dist_m <= 300 ? 'poi-proximity-trail' : 
+                  p.dist_m <= 1500 ? 'poi-proximity-near' : 
                   'poi-proximity-faraway';
       html += `<div class="poi-item">
         <div class="poi-header">
