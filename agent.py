@@ -400,6 +400,13 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
     total_m = total_min % 60
     eta_end_str = f"{min((start_total_min + total_min) // 60, 23):02d}:{(start_total_min + total_min) % 60:02d}"
 
+    # Gęste punkty GPX co ~500m dla POI
+    dense_step = max(1, len(seg) // min(len(seg), int(length_km * 2) + 1))
+    trail_pts = [
+        {"lat": round(p.lat, 5), "lon": round(p.lon, 5), "km": round(p.km - seg[0].km, 2)}
+        for p in seg[::dense_step]
+    ]
+
     return {
         "date": trip_date.isoformat(),
         "start_name": start_name,
@@ -411,6 +418,7 @@ def collect_trail_data(location: str, distance_km: float, trip_date: date,
         "eta_end": eta_end_str,
         "soil_summary": soil["summary"],
         "rows": rows,
+        "trail_pts": trail_pts,
         "summary": summary,
         "recommendation": "",
         "recommendation_reason": "",

@@ -492,7 +492,7 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         cat_labels = ", ".join(ALL_POI_CATS[c] for c in selected if c in ALL_POI_CATS)
         await query.edit_message_text(f"Szukam obiektów ({cat_labels})... ⏳")
 
-        # Pobierz punkty trasy
+        # Pobierz gęste punkty trasy
         trail_pts = []
         try:
             resp = http_requests.get(
@@ -500,14 +500,21 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             if resp.status_code == 200:
                 route_data = resp.json()
-                rows = route_data.get("rows", [])
-                if route_data.get("part2"):
-                    rows += route_data["part2"].get("rows", [])
-                trail_pts = [
-                    {"lat": r["lat"], "lon": r["lon"], "km": r["km"]}
-                    for r in rows
-                    if "lat" in r and "lon" in r and "km" in r
-                ]
+                # Użyj gęstych punktów GPX jeśli dostępne
+                trail_pts = route_data.get("trail_pts", [])
+                if not trail_pts:
+                    # Fallback do rows
+                    rows = route_data.get("rows", [])
+                    if route_data.get("part2"):
+                        rows += route_data["part2"].get("rows", [])
+                    trail_pts = [
+                        {"lat": r["lat"], "lon": r["lon"], "km": r["km"]}
+                        for r in rows
+                        if "lat" in r and "lon" in r and "km" in r
+                    ]
+                # Dla tras podzielonych — połącz trail_pts z obu części
+                if route_data.get("part2") and route_data["part2"].get("trail_pts"):
+                    trail_pts += route_data["part2"]["trail_pts"]
         except Exception as e:
             logging.warning(f"Nie mozna pobrac trasy: {e}")
 
