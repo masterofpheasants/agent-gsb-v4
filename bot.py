@@ -174,13 +174,20 @@ def _webapp_button(uid: str) -> InlineKeyboardMarkup | None:
     ]])
 
 
+def _uid_short(uid: str) -> str:
+    import hashlib
+    short = hashlib.md5(uid.encode()).hexdigest()[:8]
+    _uid_map[short] = uid
+    return short
+
+
+def _uid_full(short: str) -> str:
+    return _uid_map.get(short, short)
+
+
 def _poi_keyboard(user_id: int, uid: str) -> InlineKeyboardMarkup:
     selected = _poi_cats_cache.get(user_id, set())
-    # Skróć uid do hash żeby zmieścić się w 64 znakach
-    import hashlib
-    uid_short = hashlib.md5(uid.encode()).hexdigest()[:8]
-    # Zapisz mapowanie
-    _uid_map[uid_short] = uid
+    short = _uid_short(uid)
     rows = []
     cats = list(ALL_POI_CATS.items())
     for i in range(0, len(cats), 2):
@@ -189,11 +196,11 @@ def _poi_keyboard(user_id: int, uid: str) -> InlineKeyboardMarkup:
             checked = "✅" if cat_id in selected else "☑️"
             row.append(InlineKeyboardButton(
                 f"{checked} {label}",
-                callback_data=f"poi_toggle:{cat_id}:{uid_short}"
+                callback_data=f"poi_toggle:{cat_id}:{short}"
             ))
         rows.append(row)
     rows.append([
-        InlineKeyboardButton("🗺️ Generuj obiekty", callback_data=f"poi_generate:{uid_short}"),
+        InlineKeyboardButton("🗺️ Generuj obiekty", callback_data=f"poi_generate:{short}"),
         InlineKeyboardButton("❌ Pomiń", callback_data="poi_skip"),
     ])
     return InlineKeyboardMarkup(rows)
@@ -456,14 +463,12 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     user_id = query.from_user.id
     data = query.data
-    uid_short = data.split(":", 1)[1]  # lub split(":", 2)[2]
-    uid = _uid_map.get(uid_short, uid_short)
 
     # Toggle kategorii
     if data.startswith("poi_toggle:"):
         parts = data.split(":", 2)
         cat_id = parts[1]
-        uid = parts[2]
+        uid = _uid_full(parts[2])
         selected = _poi_cats_cache.get(user_id, set())
         if cat_id in selected:
             selected.discard(cat_id)
@@ -485,7 +490,7 @@ async def handle_poi_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Generuj
     if data.startswith("poi_generate:"):
-        uid = data.split(":", 1)[1]
+        uid = _uid_full(data.split(":", 1)[1])
         selected = _poi_cats_cache.get(user_id, set())
 
         if not selected:
